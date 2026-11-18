@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Cut Music 1.0</title>
+<meta name="theme-color" content="#ff7a1a" />
+<link rel="manifest" href="manifest.json" />
+<link rel="icon" href="assets/icons/icon-192.png" />
+<link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png" />
+<link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css" />
+<link rel="stylesheet" href="vendor/bootstrap-icons/bootstrap-icons.min.css" />
+<link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+
+<header class="cm-header">
+  <div class="container-xxl d-flex align-items-center gap-3">
+    <img src="assets/icons/icon-192.png" alt="" class="cm-logo" />
+    <div class="flex-grow-1">
+      <h1 class="cm-title mb-0">CUT MUSIC <span class="cm-version">1.0</span></h1>
+      <div class="cm-subtitle">Divide tus canciones en fragmentos · procesamiento 100% local</div>
+    </div>
+    <div class="d-flex align-items-center gap-2">
+      <span id="offlineBadge" class="badge cm-badge" title="Funciona sin conexión">
+        <i class="bi bi-shield-check"></i> Local
+      </span>
+      <button id="installBtn" class="btn btn-sm cm-btn-outline d-none" type="button">
+        <i class="bi bi-download"></i> Instalar Cut Music
+      </button>
+    </div>
+  </div>
+</header>
+
+<main class="container-xxl pb-5">
+  <div class="row g-4">
+
+    <!-- A. Entrada -->
+    <section class="col-12 col-lg-6">
+      <div class="cm-card h-100">
+        <div class="cm-card-head">
+          <i class="bi bi-music-note-beamed"></i>
+          <span>1 · Canción</span>
+        </div>
+        <div class="cm-card-body">
+          <div id="dropZone" class="cm-drop" tabindex="0" role="button"
+               aria-label="Arrastra aquí tu canción o pulsa para elegir un archivo">
+            <i class="bi bi-cloud-arrow-up cm-drop-icon"></i>
+            <div class="cm-drop-title">ARRASTRA AQUÍ TU CANCIÓN</div>
+            <div class="cm-drop-hint">o pulsa el botón + para elegirla</div>
+            <button id="pickBtn" class="btn cm-btn-add" type="button" title="Elegir archivo">
+              <i class="bi bi-plus-lg"></i>
+            </button>
+            <input id="fileInput" type="file" accept="audio/*,.mp3,.wav,.flac,.m4a,.aac,.ogg,.wma,.opus,.aiff" hidden />
+          </div>
+
+          <div id="fileInfo" class="cm-fileinfo d-none">
+            <div class="d-flex align-items-start gap-3">
+              <i class="bi bi-file-earmark-music cm-fileicon"></i>
+              <div class="flex-grow-1 min-w-0">
+                <div id="fileName" class="cm-filename text-truncate">—</div>
+                <div class="cm-filemeta">
+                  <span id="fileFormat" class="badge cm-badge">—</span>
+                  <span id="fileSize" class="cm-muted">—</span>
+                  <span id="fileRate" class="cm-muted">—</span>
+                </div>
+              </div>
+              <button id="clearFileBtn" class="btn btn-sm cm-btn-ghost" title="Quitar archivo">
+                <i class="bi bi-x-lg"></i>
+              </button>
+            </div>
+            <div class="d-flex justify-content-between align-items-end mt-3">
+              <div>
+                <div class="cm-label">DURACIÓN</div>
+                <div id="fileDuration" class="cm-value">—</div>
+              </div>
+              <div class="text-end">
+                <div class="cm-label">ESTADO</div>
+                <div id="fileStatus" class="cm-value cm-ok">Listo</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- B. Partes -->
+    <section class="col-12 col-lg-6">
+      <div class="cm-card h-100">
+        <div class="cm-card-head">
+          <i class="bi bi-scissors"></i>
+          <span>2 · Partes</span>
+        </div>
+        <div class="cm-card-body">
+          <label for="chunkInput" class="cm-label">DURACIÓN DE CADA FRAGMENTO (SEGUNDOS)</label>
+          <div class="input-group cm-inputgroup">
+            <input id="chunkInput" type="number" class="form-control" min="0.1" step="0.1" value="10" inputmode="decimal" />
+            <span class="input-group-text">seg</span>
+          </div>
+          <div class="cm-chips mt-3" id="presetChips">
+            <button type="button" class="btn cm-chip" data-sec="2">2</button>
+            <button type="button" class="btn cm-chip" data-sec="5">5</button>
+            <button type="button" class="btn cm-chip active" data-sec="10">10</button>
+            <button type="button" class="btn cm-chip" data-sec="15">15</button>
+            <button type="button" class="btn cm-chip" data-sec="30">30</button>
+            <button type="button" class="btn cm-chip" data-sec="60">60</button>
+          </div>
+          <div id="chunkError" class="cm-error d-none"></div>
+
+          <hr class="cm-hr" />
+
+          <div class="cm-label">RESUMEN DEL CORTE</div>
+          <div id="summaryBox" class="cm-summary">
+            <div class="d-flex justify-content-between"><span>Fragmentos completos</span><strong id="sumFull">—</strong></div>
+            <div class="d-flex justify-content-between"><span>Último fragmento</span><strong id="sumLast">—</strong></div>
+            <div class="d-flex justify-content-between"><span>Total de archivos</span><strong id="sumTotal">—</strong></div>
+          </div>
+          <div id="remainderInfo" class="cm-note d-none"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- D. Formato -->
+    <section class="col-12 col-lg-6">
+      <div class="cm-card h-100">
+        <div class="cm-card-head">
+          <i class="bi bi-sliders2"></i>
+          <span>3 · Formato de exportación</span>
+        </div>
+        <div class="cm-card-body">
+          <div class="row g-3">
+            <div class="col-6">
+              <label class="cm-label" for="formatSelect">FORMATO</label>
+              <select id="formatSelect" class="form-select"></select>
+            </div>
+            <div class="col-6">
+              <label class="cm-label" for="rateSelect">FRECUENCIA</label>
+              <select id="rateSelect" class="form-select">
+                <option value="44100" selected>44.100 Hz</option>
+                <option value="48000">48.000 Hz</option>
+                <option value="32000">32.000 Hz</option>
+                <option value="22050">22.050 Hz</option>
+              </select>
+            </div>
+            <div class="col-12" id="bitrateRow">
+              <label class="cm-label" for="bitrateSelect">CALIDAD (BITRATE)</label>
+              <select id="bitrateSelect" class="form-select">
+                <option value="128">128 kbps</option>
+                <option value="160">160 kbps</option>
+                <option value="192" selected>192 kbps</option>
+                <option value="224">224 kbps</option>
+                <option value="256">256 kbps</option>
+                <option value="320">320 kbps</option>
+              </select>
+            </div>
+            <div class="col-12">
+              <div id="formatHint" class="cm-hint"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- E. Destino -->
+    <section class="col-12 col-lg-6">
+      <div class="cm-card h-100">
+        <div class="cm-card-head">
+          <i class="bi bi-folder2-open"></i>
+          <span>4 · Destino de los fragmentos</span>
+        </div>
+        <div class="cm-card-body">
+          <div class="d-flex flex-wrap gap-2">
+            <button id="pickFolderBtn" class="btn cm-btn-primary" type="button">
+              <i class="bi bi-folder-plus"></i> Elegir carpeta
+            </button>
+            <button id="clearFolderBtn" class="btn cm-btn-ghost d-none" type="button">
+              <i class="bi bi-x-lg"></i> Quitar
+            </button>
+          </div>
+          <div id="folderInfo" class="cm-folder mt-3 d-none">
+            <i class="bi bi-folder-check"></i>
+            <span id="folderName">—</span>
+          </div>
+          <div class="cm-hint mt-2">
+            Si no eliges carpeta, podrás descargar cada fragmento o todos en un ZIP.
+            Chrome pedirá permiso de escritura la primera vez.
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- F. Botón -->
+    <section class="col-12">
+      <div class="cm-actionbar">
+        <div id="globalError" class="cm-error d-none"></div>
+        <button id="splitBtn" class="btn cm-btn-split" type="button" disabled>
+          <i class="bi bi-scissors"></i> DIVIDIR CANCIÓN
+        </button>
+      </div>
+    </section>
+
+    <!-- Progreso -->
+    <section class="col-12 d-none" id="progressCard">
+      <div class="cm-card">
+        <div class="cm-card-head">
+          <i class="bi bi-activity"></i>
+          <span>Procesando</span>
+          <span id="progressPhase" class="ms-auto cm-muted">—</span>
+        </div>
+        <div class="cm-card-body">
+          <div class="d-flex justify-content-between align-items-end mb-2">
+            <div>
+              <div class="cm-label">PROGRESO</div>
+              <div id="progressPercent" class="cm-value">0%</div>
+            </div>
+            <div class="text-end">
+              <div class="cm-label">FRAGMENTO</div>
+              <div id="progressFragment" class="cm-value">0 / 0</div>
+            </div>
+            <div class="text-end">
+              <div class="cm-label">RESTANTE</div>
+              <div id="progressEta" class="cm-value">—</div>
+            </div>
+            <button id="cancelBtn" class="btn cm-btn-danger" type="button">
+              <i class="bi bi-x-octagon"></i> Cancelar
+            </button>
+          </div>
+          <div class="progress cm-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100">
+            <div id="progressBar" class="progress-bar" style="width:0%"></div>
+          </div>
+          <div id="progressDetail" class="cm-hint mt-2">Preparando FFmpeg…</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Resultados -->
+    <section class="col-12 d-none" id="resultsCard">
+      <div class="cm-card">
+        <div class="cm-card-head">
+          <i class="bi bi-check2-circle"></i>
+          <span id="resultsTitle">PROCESAMIENTO COMPLETADO</span>
+          <span id="resultsMeta" class="ms-auto cm-muted"></span>
+        </div>
+        <div class="cm-card-body">
+          <div class="d-flex flex-wrap gap-2 mb-3">
+            <button id="zipBtn" class="btn cm-btn-primary" type="button">
+              <i class="bi bi-file-zip"></i> Descargar ZIP
+            </button>
+            <button id="saveAllBtn" class="btn cm-btn-outline d-none" type="button">
+              <i class="bi bi-folder-check"></i> Guardar en la carpeta
+            </button>
+            <button id="restartBtn" class="btn cm-btn-ghost" type="button">
+              <i class="bi bi-arrow-counterclockwise"></i> Volver al inicio
+            </button>
+          </div>
+          <div id="resultsList" class="cm-results"></div>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <footer class="cm-footer">
+    <span><i class="bi bi-lock-fill"></i> Todo se procesa en tu equipo. Nada se sube a ningún servidor.</span>
+    <span class="cm-muted">Cut Music 1.0 · FFmpeg.wasm</span>
+  </footer>
+</main>
+
+<!-- Modal sobrante -->
+<div class="modal fade" id="remainderModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content cm-modal">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-exclamation-diamond"></i> Fragmento final más corto</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        <p id="remainderText" class="mb-3"></p>
+        <div class="d-grid gap-2">
+          <button id="modeSeparate" class="btn cm-btn-primary text-start" type="button">
+            <strong>Separar el sobrante</strong>
+            <span id="separateDesc" class="d-block small opacity-75"></span>
+          </button>
+          <button id="modeMerge" class="btn cm-btn-outline text-start" type="button">
+            <strong>Unir el sobrante al último fragmento</strong>
+            <span id="mergeDesc" class="d-block small opacity-75"></span>
+          </button>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn cm-btn-ghost" data-bs-dismiss="modal">Cancelar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
+<script src="vendor/jszip/jszip.min.js"></script>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
