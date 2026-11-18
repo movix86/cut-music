@@ -1,5 +1,9 @@
 # CUT MUSIC 1.0
 
+**Demo instalable:** https://movix86.github.io/cut-music/
+
+**Repositorio:** https://github.com/movix86/cut-music
+
 Aplicación web (PWA) para dividir canciones en fragmentos de duración configurable.
 **Todo el procesamiento ocurre en tu equipo**: ningún audio se sube a ningún servidor.
 
