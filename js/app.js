@@ -9,7 +9,9 @@ import { isAudioFile, describeFile, readDuration, readArrayBuffer, bindDropZone,
 import { AudioWorkerClient } from './worker-manager.js';
 import { downloadBlob, makeZip, sanitizeFilename } from './export-manager.js';
 import { buildPeaks, WaveView } from './wave-editor.js';
-import { t, setLang, applyStatic, getLang } from './i18n.js';
+import {
+  t, setLang, applyStatic, getLang, LANG_NAMES, LANG_FLAGS, loadLang, saveLang,
+} from './i18n.js';
 
 const $ = (id) => document.getElementById(id);
 const APP_VERSION = '1.1.0';
@@ -71,7 +73,9 @@ const el = {
   markerStart: $('markerStart'), markerEnd: $('markerEnd'), playhead: $('playhead'),
   playBar: $('playBar'), playBtn: $('playBtn'), pauseBtn: $('pauseBtn'), stopBtn: $('stopBtn'),
   playTime: $('playTime'), playSpan: $('playSpan'),
-  langBar: $('langBar'), zoomBar: $('zoomBar'),
+  langPicker: $('langPicker'), langBtn: $('langBtn'), langMenu: $('langMenu'),
+  langFlag: $('langFlag'), langName: $('langName'),
+  zoomBar: $('zoomBar'),
   splitBtnLabel: $('splitBtnLabel'),
   splitBtn: $('splitBtn'), globalError: $('globalError'),
   progressCard: $('progressCard'), progressBar: $('progressBar'), progressPercent: $('progressPercent'),
@@ -1188,12 +1192,21 @@ function bindEvents() {
   bindMarkerDrag(el.markerStart, 'start');
   bindMarkerDrag(el.markerEnd, 'end');
 
-  if (el.langBar) {
-    el.langBar.addEventListener('click', (event) => {
-      const btn = event.target.closest('[data-lang]');
-      if (!btn) return;
-      setLang(btn.dataset.lang);
-      refreshLanguageUI();
+  if (el.langBtn) {
+    el.langBtn.addEventListener('click', (event) => {
+      event.stopPropagation();
+      toggleLangMenu();
+    });
+    el.langMenu.addEventListener('click', (event) => {
+      const item = event.target.closest('[data-lang]');
+      if (!item) return;
+      selectLanguage(item.dataset.lang);
+    });
+    document.addEventListener('click', (event) => {
+      if (!el.langPicker.contains(event.target)) closeLangMenu();
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') closeLangMenu();
     });
   }
   if (el.zoomBar) {
@@ -1263,13 +1276,53 @@ function bindPwa() {
 
 /* ---------------- arranque ---------------- */
 
+function openLangMenu() {
+  if (!el.langMenu) return;
+  el.langMenu.classList.remove('d-none');
+  el.langBtn.setAttribute('aria-expanded', 'true');
+  el.langPicker.classList.add('open');
+}
+
+function closeLangMenu() {
+  if (!el.langMenu) return;
+  el.langMenu.classList.add('d-none');
+  el.langBtn.setAttribute('aria-expanded', 'false');
+  el.langPicker.classList.remove('open');
+}
+
+function toggleLangMenu() {
+  if (!el.langMenu) return;
+  if (el.langMenu.classList.contains('d-none')) openLangMenu();
+  else closeLangMenu();
+}
+
+function renderLangPicker() {
+  if (!el.langMenu || !el.langBtn) return;
+  const current = getLang();
+  el.langMenu.innerHTML = Object.keys(LANG_NAMES).map((lang) => `
+    <li role="option" class="cm-langitem${lang === current ? ' active' : ''}" data-lang="${lang}" aria-selected="${lang === current}">
+      <span class="cm-lang-flag">${LANG_FLAGS[lang]}</span>
+      <span class="cm-langname">${LANG_NAMES[lang]}</span>
+      <i class="bi bi-check2 cm-langcheck"></i>
+    </li>`).join('');
+  el.langFlag.innerHTML = LANG_FLAGS[current];
+  el.langName.textContent = LANG_NAMES[current];
+  el.langBtn.title = LANG_NAMES[current];
+  el.langBtn.setAttribute('aria-expanded', 'false');
+  el.langPicker.classList.remove('open');
+}
+
+function selectLanguage(lang) {
+  if (!LANG_NAMES[lang]) return;
+  setLang(lang);
+  saveLang(lang);
+  closeLangMenu();
+  refreshLanguageUI();
+}
+
 function refreshLanguageUI() {
   applyStatic();
-  if (el.langBar) {
-    el.langBar.querySelectorAll('[data-lang]').forEach((b) => {
-      b.classList.toggle('active', b.dataset.lang === getLang());
-    });
-  }
+  renderLangPicker();
   if (el.splitBtnLabel) el.splitBtnLabel.textContent = t(state.intervalMode ? 'btn.cut' : 'btn.split');
   updateFormatOptions();
   updateSummary();
@@ -1286,8 +1339,9 @@ function refreshLanguageUI() {
 }
 
 function boot() {
-  setLang('es');
+  setLang(loadLang());
   applyStatic();
+  renderLangPicker();
   remainderModal = new window.bootstrap.Modal(el.remainderModal, { backdrop: 'static', keyboard: false });
   waveView = new WaveView(el.waveWrap, el.waveCanvas);
   if (typeof ResizeObserver === 'function') {

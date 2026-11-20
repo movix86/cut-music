@@ -499,18 +499,45 @@ body {
 .cm-playtime { font-variant-numeric: tabular-nums; font-size: 0.82rem; }
 
 /* ---------- v1.1.0: idiomas, zoom y marcadores START/END ---------- */
-.cm-langs { display: flex; align-items: center; gap: 4px; }
-.cm-lang {
-  width: 30px; height: 23px; padding: 2px;
-  display: grid; place-items: center;
+.cm-langpicker { position: relative; }
+.cm-langbtn {
+  display: flex; align-items: center; gap: 8px;
+  height: 32px; padding: 0 10px;
   background: #0e131c;
   border: 1px solid var(--cm-border);
-  border-radius: 6px;
+  border-radius: 8px;
+  color: var(--cm-ink);
+  font-size: 0.8rem;
+  font-weight: 600;
   cursor: pointer;
 }
-.cm-lang svg { display: block; width: 22px; height: 15px; border-radius: 2px; }
-.cm-lang:hover { border-color: var(--cm-accent); }
-.cm-lang.active { border-color: var(--cm-accent); background: rgba(255, 122, 26, 0.14); box-shadow: 0 0 0 1px rgba(255, 122, 26, 0.35); }
+.cm-langbtn:hover, .cm-langpicker.open .cm-langbtn { border-color: var(--cm-accent); }
+.cm-langbtn .bi-chevron-down { font-size: 0.68rem; color: var(--cm-muted); }
+.cm-lang-flag { display: inline-flex; width: 22px; height: 15px; }
+.cm-lang-flag svg { display: block; width: 22px; height: 15px; border-radius: 2px; }
+.cm-langmenu {
+  position: absolute; right: 0; top: calc(100% + 6px);
+  min-width: 235px; margin: 0; padding: 6px;
+  list-style: none;
+  background: #121722;
+  border: 1px solid var(--cm-border);
+  border-radius: 10px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
+  z-index: 1080;
+}
+.cm-langitem {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.84rem;
+  color: var(--cm-ink);
+}
+.cm-langitem:hover { background: rgba(255, 122, 26, 0.10); }
+.cm-langitem .cm-langname { flex: 1; }
+.cm-langcheck { opacity: 0; color: var(--cm-accent); }
+.cm-langitem.active { background: rgba(255, 122, 26, 0.14); }
+.cm-langitem.active .cm-langcheck { opacity: 1; }
 
 .cm-wave-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .cm-zoombar { display: flex; gap: 3px; margin-left: auto; }

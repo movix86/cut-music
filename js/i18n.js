@@ -657,3 +657,37 @@ export function applyStatic(root = document) {
   const title = t('doc.title');
   if (title) document.title = `${title} 1.1.0`;
 }
+
+/* ---------- v1.1.0: selector desplegable y persistencia ---------- */
+export const LANG_NAMES = {
+  es: 'Español',
+  en: 'English (United States)',
+  fr: 'Français',
+  zh: '中文',
+};
+
+export const LANG_FLAGS = {
+  es: '<svg viewBox="0 0 22 15" aria-hidden="true"><rect width="22" height="15" fill="#c60b1e"/><rect y="4" width="22" height="7" fill="#ffc400"/></svg>',
+  en: '<svg viewBox="0 0 22 15" aria-hidden="true"><rect width="22" height="15" fill="#fff"/><g fill="#b22234"><rect width="22" height="1.15"/><rect y="2.3" width="22" height="1.15"/><rect y="4.6" width="22" height="1.15"/><rect y="6.9" width="22" height="1.15"/><rect y="9.2" width="22" height="1.15"/><rect y="11.5" width="22" height="1.15"/><rect y="13.8" width="22" height="1.15"/></g><rect width="9" height="8.05" fill="#3c3b6e"/><g fill="#fff"><circle cx="1.6" cy="1.5" r=".5"/><circle cx="4.2" cy="1.5" r=".5"/><circle cx="6.8" cy="1.5" r=".5"/><circle cx="2.9" cy="3.1" r=".5"/><circle cx="5.5" cy="3.1" r=".5"/><circle cx="1.6" cy="4.7" r=".5"/><circle cx="4.2" cy="4.7" r=".5"/><circle cx="6.8" cy="4.7" r=".5"/><circle cx="2.9" cy="6.3" r=".5"/><circle cx="5.5" cy="6.3" r=".5"/></g></svg>',
+  fr: '<svg viewBox="0 0 22 15" aria-hidden="true"><rect width="7.33" height="15" fill="#0055a4"/><rect x="7.33" width="7.34" height="15" fill="#fff"/><rect x="14.67" width="7.33" height="15" fill="#ef4135"/></svg>',
+  zh: '<svg viewBox="0 0 22 15" aria-hidden="true"><rect width="22" height="15" fill="#de2910"/><path d="M4.2 2.2 L5 4.8 L7.7 4.8 L5.5 6.4 L6.3 9 L4.2 7.4 L2.1 9 L2.9 6.4 L0.7 4.8 L3.4 4.8 Z" fill="#ffde00"/></svg>',
+};
+
+const STORAGE_KEY = 'cutMusic.language';
+
+/** Idioma guardado; español si no hay preferencia válida. */
+export function loadLang() {
+  try {
+    const value = localStorage.getItem(STORAGE_KEY);
+    return LANGUAGES.includes(value) ? value : 'es';
+  } catch (e) {
+    return 'es';
+  }
+}
+
+/** Guarda la preferencia de idioma para futuras sesiones. */
+export function saveLang(lang) {
+  try {
+    localStorage.setItem(STORAGE_KEY, LANGUAGES.includes(lang) ? lang : 'es');
+  } catch (e) { /* modo privado sin almacenamiento */ }
+}

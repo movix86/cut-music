@@ -119,3 +119,27 @@ hora/minuto/segundo de ahí; verificado en 79,9999 s → `00:01:20.000`.
 - Scrub: `AudioBufferSourceNode` sobre el búfer mono decodificado; se reinicia cada ~70 ms con
   fundido de 8 ms. Respaldo con `<audio>` para canciones de más de 10 minutos.
 - Idiomas: diccionario único `js/i18n.js`; textos estáticos con `data-i18n` y dinámicos con `t()`.
+
+---
+
+## Selector de idiomas y persistencia (20/11/2026)
+
+| # | Caso | Resultado |
+|---|---|---|
+| 1 | Primera apertura sin preferencia | español (`localStorage` vacío) ✅ |
+| 2 | Abrir el selector | lista con 4 idiomas y sus banderas ✅ |
+| 3 | Bandera de inglés | solo 🇺🇸; no existe 🇬🇧 en la interfaz ni en el código ✅ |
+| 4 | Elegir English (United States) | toda la interfaz en inglés ✅ |
+| 5 | Recargar la página | sigue en inglés ✅ |
+| 6 | Nueva pestaña/ventana | sigue en inglés (misma preferencia) ✅ |
+| 7 | Francés, recargar | sigue en francés ✅ |
+| 8 | Chino, recargar | sigue en chino ✅ |
+| 9 | Volver a español | se guarda `es` ✅ |
+| 10 | Cambiar idioma con canción cargada | conserva archivo, selección 35→80 y zoom 2 ✅ |
+| 11 | Escape / clic fuera | cierran la lista ✅ |
+| 12 | Regresión división por partes | 5 s ÷ 10 s → 1 archivo ✅ |
+| 13 | ZIP | `cancion5_partes.zip` ✅ |
+
+Persistencia comprobada con `localStorage.getItem('cutMusic.language')` en cada cambio y
+tras recargar. La clave sobrevive a actualizaciones de la app porque el service worker solo
+cachea recursos estáticos.

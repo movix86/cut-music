@@ -3,7 +3,7 @@
    Cachea el shell de la app y los recursos de la interfaz.
    El núcleo de FFmpeg (30 MB) se cachea la primera vez que se usa.
    ============================================================ */
-const VERSION = 'cutmusic-v1.1.0-zoom-i18n';
+const VERSION = 'cutmusic-v1.1.0-langpicker';
 const SHELL = [
   './',
   './index.html',

@@ -72,9 +72,20 @@ los límites para la siguiente escucha.
 
 ### C) Idioma
 
-En la cabecera hay cinco banderas: 🇪🇸, 🇬🇧, 🇺🇸, 🇫🇷, 🇨🇳. Las dos inglesas activan el
-mismo idioma. El cambio es inmediato, sin recargar, y no pierde la canción ni la selección.
-El idioma inicial es siempre español.
+En la cabecera hay un **selector desplegable** con cuatro idiomas:
+
+| Bandera | Idioma |
+|---|---|
+| 🇪🇸 | Español |
+| 🇺🇸 | English (United States) |
+| 🇫🇷 | Français |
+| 🇨🇳 | 中文 |
+
+Al pulsar el botón se abre la lista; al elegir una opción, toda la interfaz cambia al
+instante, sin recargar y sin perder la canción, la selección ni el zoom. La preferencia se
+guarda en `localStorage` con la clave `cutMusic.language` y se recupera en la siguiente
+sesión (aunque se cierre Chrome o se reinicie el equipo). En la primera ejecución, sin
+preferencia guardada, se carga español.
 
 ## 4. Estructura
 
