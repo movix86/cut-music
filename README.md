@@ -1,19 +1,29 @@
 # CUT MUSIC 1.1.0
 
-Aplicación web (PWA) para trabajar con canciones **en local**: dividirlas en fragmentos de
-duración configurable o **extraer un único intervalo** con un editor visual.
+Aplicación web para dividir canciones y extraer intervalos de audio mediante una interfaz
+gráfica, con procesamiento local utilizando FFmpeg.wasm.
+
+**Demo instalable:** <https://movix86.github.io/cut-music/>
+**Repositorio:** <https://github.com/movix86/cut-music>
 
 **Todo el procesamiento ocurre en tu equipo**: ningún audio se sube a ningún servidor.
 
-- HTML5 + CSS3 + JavaScript moderno
-- Bootstrap 5 y Bootstrap Icons (locales, sin CDN)
-- FFmpeg.wasm (`@ffmpeg/core` 0.12.10, FFmpeg 5.1.4) en un Web Worker
-- Web Audio API para la forma de onda y la escucha en tiempo real
-- PWA: `manifest.json` + `service-worker.js` + iconos PNG
-- Interfaz en **español, inglés, francés y chino**
+Características principales:
 
-> **Estado:** 1.1.0 entregada para revisión. GitHub Pages sigue mostrando la 1.0.0 hasta
-> que se apruebe la publicación.
+- División de canciones en fragmentos de duración configurable (con gestión del sobrante).
+- Corte de un intervalo exacto entre dos tiempos, como archivo único.
+- Editor visual con forma de onda, zoom de 7 niveles y marcadores START/END.
+- Reproducción del intervalo (Play/Pause/Stop) y escucha en tiempo real al mover marcadores.
+- Exportación a MP3, WAV, FLAC, M4A, AAC, WMA y OGG con calidad configurable.
+- Interfaz en español, inglés estadounidense, francés y chino, con preferencia persistente.
+- Descarga individual, ZIP y guardado local; PWA instalable en Chrome.
+
+Tecnologías: HTML5 + CSS3 + JavaScript moderno, Bootstrap 5 y Bootstrap Icons (locales, sin
+CDN), FFmpeg.wasm (`@ffmpeg/core` 0.12.10, FFmpeg 5.1.4) en un Web Worker, Web Audio API
+para la forma de onda y la escucha en tiempo real, PWA con `manifest.json` +
+`service-worker.js` + iconos PNG.
+
+> **Estado:** versión 1.1.0 publicada. La demo de GitHub Pages sirve esta misma versión.
 
 ---
 
@@ -164,11 +174,28 @@ Detalle en [tests/pruebas.md](tests/pruebas.md).
 | 7 | Live scrubbing END | ✅ mismas comprobaciones |
 | 8–10 | Play/Pause/Stop | ✅ reanuda y vuelve al inicio |
 | 11 | Español inicial | ✅ |
-| 12 | Inglés (GB y US) | ✅ ambos botones activan EN |
+| 12 | Inglés (US) | ✅ selector desplegable; solo bandera 🇺🇸 |
 | 13 | Francés | ✅ |
 | 14 | Chino | ✅ caracteres correctos |
-| 15 | Cambio en caliente | ✅ conserva canción, selección y zoom |
+| 15 | Cambio en caliente y persistencia | ✅ conserva el estado y recuerda el idioma |
 | 16 | Exportación tras zoom/scrub | ✅ 35,000 s (45→80) |
 | 17 | Regresión división por partes | ✅ 23 fragmentos |
 | 18 | ZIP | ✅ `cancion230_partes.zip` |
 | 19 | Original intacto | ✅ SHA-256 sin cambios |
+
+## 9. Créditos
+
+Desarrollado con DeepSeek y Juan Guillermo.
+
+## 10. Licencias y atribuciones
+
+- **Código de Cut Music**: © Juan Guillermo. Todos los derechos reservados salvo
+  autorización expresa del autor.
+- **FFmpeg / FFmpeg.wasm** (`vendor/ffmpeg`, `@ffmpeg/core` 0.12.10): FFmpeg es software
+  libre bajo LGPL 2.1 o posterior; esta compilación puede incluir componentes GPL
+  (por ejemplo libx264). Se distribuye sin modificaciones. Más información:
+  <https://ffmpeg.org/legal.html> y <https://github.com/ffmpegwasm/ffmpeg.wasm>.
+- **Bootstrap 5** y **Bootstrap Icons**: MIT.
+- **JSZip**: MIT.
+- Los audios de `tests/fixtures` son tonos generados con FFmpeg para las pruebas, sin
+  contenido de terceros.
