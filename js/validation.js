@@ -57,3 +57,49 @@ export function fileExtension(name) {
 export function baseName(name) {
   return String(name || 'Cancion').replace(/\.[^.]+$/, '').replace(/[\\/:*?"<>|]+/g, '_').trim() || 'Cancion';
 }
+
+/* ---------- v1.1.0: tiempos HH:MM:SS.mmm ---------- */
+
+/** Convierte "00:00:35.000", "1:20", "35" o "2,5" a segundos. */
+export function parseTimestamp(raw) {
+  const text = String(raw ?? '').trim().replace(',', '.');
+  if (!text) return { ok: false, error: 'El tiempo no puede estar vacío.' };
+  if (!/^\d{1,3}(:\d{1,2}){0,2}(\.\d{1,3})?$/.test(text)) {
+    return { ok: false, error: 'Formato no válido. Usa HH:MM:SS.mmm (ejemplo: 00:00:35.000).' };
+  }
+  const parts = text.split(':');
+  let hours = 0;
+  let minutes = 0;
+  let seconds = 0;
+  if (parts.length === 3) {
+    hours = Number(parts[0]);
+    minutes = Number(parts[1]);
+    seconds = Number(parts[2]);
+    if (minutes > 59 || seconds >= 60) {
+      return { ok: false, error: 'Los minutos y segundos deben ser menores de 60.' };
+    }
+  } else if (parts.length === 2) {
+    minutes = Number(parts[0]);
+    seconds = Number(parts[1]);
+    if (seconds >= 60) {
+      return { ok: false, error: 'Los segundos deben ser menores de 60.' };
+    }
+  } else {
+    seconds = Number(parts[0]);
+  }
+  const value = hours * 3600 + minutes * 60 + seconds;
+  if (!Number.isFinite(value)) return { ok: false, error: 'El tiempo no es válido.' };
+  if (value < 0) return { ok: false, error: 'El tiempo no puede ser negativo.' };
+  return { ok: true, value };
+}
+
+/** Segundos -> "HH:MM:SS.mmm" */
+export function formatTimestamp(seconds) {
+  const total = Math.max(0, Number(seconds) || 0);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = Math.floor(total % 60);
+  const ms = Math.round((total - Math.floor(total)) * 1000);
+  const pad = (n, w = 2) => String(n).padStart(w, '0');
+  return `${pad(h)}:${pad(m)}:${pad(s)}.${pad(ms, 3)}`;
+}

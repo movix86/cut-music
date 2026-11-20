@@ -1,54 +1,48 @@
-# Pruebas de Cut Music 1.0
+# Pruebas de Cut Music
 
-Entorno: Google Chrome (harness web), 18/11/2026. Audios de prueba generados con FFmpeg
-(`tests/fixtures/cancion230.mp3`, `cancion235.mp3`, `cancion5.mp3`).
+## Versión 1.1.0 — corte por intervalo (20/11/2026)
 
-Procedimiento común: arrastrar/soltar el archivo, fijar la duración de fragmento, elegir
-el modo de sobrante si aparece el diálogo, dividir y medir la duración real de cada
-archivo resultante con `HTMLAudioElement.duration`.
+Entorno: Google Chrome. Audios: `tests/fixtures/cancion230.mp3` (230 s),
+`cancion235.mp3` (235,05 s), `cancion5.mp3` (5 s).
 
-## Resultados
+Procedimiento: cargar la canción, activar/desactivar el interruptor del panel 4, fijar
+los tiempos, pulsar el botón principal y medir la duración real del archivo resultante
+con `HTMLAudioElement.duration`.
 
-| # | Entrada | Config | Salida esperada | Salida real | Estado |
-|---|---|---|---|---|---|
-| 1 | 230,00 s | 10 s | 23 | 23 archivos | ✅ |
-| 2 | 235,05 s | 10 s, separar | 23×10 + 1×5 | 24 archivos, suma 235,00 s | ✅ |
-| 3 | 235,05 s | 10 s, unir | 22×10 + 1×15 | 23 archivos, suma 235,00 s | ✅ |
-| 4 | 230,00 s | 2 s | 115 | 115 archivos (2,00 s cada uno) | ✅ |
-| 5 | 5,00 s | 10 s | 1 | 1 archivo de 5,00 s | ✅ |
-| 6 | 5,00 s | MP3 192 kbps | MP3 válido | reproducido, 119 KB | ✅ |
-| 7 | 5,00 s | WAV | PCM 16 bits | 861 KB, nombre `.wav` | ✅ |
-| 8 | 5,00 s | FLAC | FLAC | 264 KB, nombre `.flac` | ✅ |
-| 9 | 5,00 s | Decimal 2,5 s | 2 fragmentos | 2,5 + 2,5 = 5,00 s | ✅ |
-| 10 | 230 s | ZIP | ZIP descargado | `cancion230_partes.zip` | ✅ |
-| 11 | 230 s mp3 | — | original intacto | tamaño y fecha sin cambios | ✅ |
+| # | Caso | Resultado |
+|---|---|---|
+| 1 | Regresión: 230 s ÷ 10 s | 23 archivos `cancion230_Parte_001…023.mp3` ✅ |
+| 2 | Activar corte por intervalo | `chunkInput.disabled = true`, panel 2 con clase `cm-inactive` y distintivo «inactivo» ✅ |
+| 3 | Desactivar corte por intervalo | panel 2 habilitado de nuevo ✅ |
+| 4 | Exclusividad | en modo intervalo solo se ejecuta el intervalo; el panel 2 no participa ✅ |
+| 5 | 35 → 80 s | 1 archivo `cancion230_Intervalo.mp3`, 45,000 s ✅ |
+| 6 | 60 → 120 s | 1 archivo, 60,000 s ✅ |
+| 7 | 2,5 → 7,5 s | 1 archivo, 5,000 s ✅ |
+| 8 | Validaciones | inicio≥fin, fin>duración, negativos, texto inválido y vacío → botón deshabilitado y mensaje claro ✅ |
+| 9 | Formatos | intervalo en WAV (861 KB) y FLAC (2.237 KB) además de MP3 ✅ |
+| 10 | Integridad | SHA-256 de `cancion230.mp3` idéntico antes y después ✅ |
+| 11 | ZIP | `cancion230_intervalo.zip` (intervalo) y `cancion230_partes.zip` (partes) ✅ |
 
-## Comprobaciones adicionales
+### Mensajes de validación comprobados
 
-- `manifest.json` responde 200; `display: standalone`; tema `#ff7a1a`.
-- Service worker **activo**; los iconos 192 y 512 responden 200.
-- `window.showDirectoryPicker` disponible en Chrome (File System Access API).
-- Codificadores disponibles en el núcleo (verificado con `-encoders`):
-  `libmp3lame`, `pcm_s16le`, `flac`, `aac`, `wmav2`, `libvorbis`.
-- Versión del núcleo: FFmpeg **5.1.4** (`@ffmpeg/core` 0.12.10).
+- «El tiempo final debe ser superior al tiempo inicial.»
+- «El tiempo final no puede superar la duración de la canción (00:03:50.000).»
+- «Tiempo de inicio: Formato no válido. Usa HH:MM:SS.mmm (ejemplo: 00:00:35.000).»
+- «Tiempo de inicio: El tiempo no puede estar vacío.»
 
-## Incidencias encontradas y corregidas
+### Notas
 
-1. **Captura de salida de FFmpeg**: el núcleo escribe por `setLogger`, no por
-   `print/printErr`; se corrigió la captura y se separó stdout/stderr.
-2. **ffprobe/JSON contaminado**: los mensajes de progreso se mezclaban con el JSON;
-   separando stdout y stderr se obtuvo la duración y el sample rate reales.
-3. **Buffer detachado**: al transferir el archivo al worker, un segundo corte sobre el
-   mismo archivo fallaba; ahora el buffer cacheado se libera y se relee si hace falta.
-4. **Memoria de FFmpeg.wasm**: tras ~50 codificaciones seguidas aparecía
-   `memory access out of bounds`. Se procesa en **lotes de 25** con un worker nuevo
-   por lote y se copia el buffer para cada lote. Con esto, 115 fragmentos se generan
-   sin errores.
+- Los tiempos se normalizan al salir del campo (`blur`) al formato `HH:MM:SS.mmm`.
+- El intervalo usa el mismo worker y la misma recodificación que la versión 1.0.
+- La división por partes conserva los lotes de 25 fragmentos y el diálogo de sobrante.
 
-## Pruebas manuales pendientes (requieren interacción del usuario)
+---
 
-- Instalar la app desde Chrome y crear el acceso directo del escritorio (los criterios
-  técnicos — manifest, service worker, iconos, HTTPS/localhost — están verificados).
-- Seleccionar carpeta con el diálogo nativo de Chrome y comprobar la escritura directa.
-  El código usa `showDirectoryPicker`, pide permiso `readwrite` y no sobrescribe
-  archivos existentes (añade ` (1)`, ` (2)`…).
+## Versión 1.0.0 (18/11/2026)
+
+Resultados históricos conservados en `backups/v1.0/tests/pruebas.md`:
+
+- 230 s ÷ 10 s → 23; 235 s ÷ 10 s separar → 23×10 + 1×5; unir → 22×10 + 1×15.
+- 230 s ÷ 2 s → 115 (lotes de 25 sin errores de memoria).
+- 5 s ÷ 10 s → 1; decimales 2,5 s → 2,5 + 2,5.
+- MP3 192, WAV, FLAC, ZIP y descargas individuales.

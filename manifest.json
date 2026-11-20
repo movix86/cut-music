@@ -1,7 +1,7 @@
 {
   "name": "Cut Music",
   "short_name": "Cut Music",
-  "description": "Divide tus canciones en fragmentos de duración configurable, 100% en local.",
+  "description": "Divide tus canciones en fragmentos o extrae un intervalo entre dos tiempos. 100% local.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",

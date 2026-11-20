@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Cut Music 1.0</title>
+<title>Cut Music 1.1.0</title>
 <meta name="theme-color" content="#ff7a1a" />
 <link rel="manifest" href="manifest.json" />
 <link rel="icon" href="assets/icons/icon-192.png" />
@@ -18,7 +18,7 @@
   <div class="container-xxl d-flex align-items-center gap-3">
     <img src="assets/icons/icon-192.png" alt="" class="cm-logo" />
     <div class="flex-grow-1">
-      <h1 class="cm-title mb-0">CUT MUSIC <span class="cm-version">1.0</span></h1>
+      <h1 class="cm-title mb-0">CUT MUSIC <span class="cm-version">1.1.0</span></h1>
       <div class="cm-subtitle">Divide tus canciones en fragmentos · procesamiento 100% local</div>
     </div>
     <div class="d-flex align-items-center gap-2">
@@ -85,13 +85,14 @@
     </section>
 
     <!-- B. Partes -->
-    <section class="col-12 col-lg-6">
+    <section class="col-12 col-lg-6" id="partsCard">
       <div class="cm-card h-100">
         <div class="cm-card-head">
           <i class="bi bi-scissors"></i>
           <span>2 · Partes</span>
+          <span id="partsInactive" class="ms-auto badge cm-badge d-none">inactivo</span>
         </div>
-        <div class="cm-card-body">
+        <div class="cm-card-body" id="partsBody">
           <label for="chunkInput" class="cm-label">DURACIÓN DE CADA FRAGMENTO (SEGUNDOS)</label>
           <div class="input-group cm-inputgroup">
             <input id="chunkInput" type="number" class="form-control" min="0.1" step="0.1" value="10" inputmode="decimal" />
@@ -161,29 +162,44 @@
       </div>
     </section>
 
-    <!-- E. Destino -->
+    <!-- E. Corte por intervalo -->
     <section class="col-12 col-lg-6">
       <div class="cm-card h-100">
         <div class="cm-card-head">
-          <i class="bi bi-folder2-open"></i>
-          <span>4 · Destino de los fragmentos</span>
+          <i class="bi bi-clock-history"></i>
+          <span>4 · Corte por intervalo</span>
         </div>
         <div class="cm-card-body">
-          <div class="d-flex flex-wrap gap-2">
-            <button id="pickFolderBtn" class="btn cm-btn-primary" type="button">
-              <i class="bi bi-folder-plus"></i> Elegir carpeta
-            </button>
-            <button id="clearFolderBtn" class="btn cm-btn-ghost d-none" type="button">
-              <i class="bi bi-x-lg"></i> Quitar
-            </button>
+          <div class="form-check form-switch cm-switch">
+            <input class="form-check-input" type="checkbox" role="switch" id="intervalToggle" />
+            <label class="form-check-label" for="intervalToggle">ACTIVAR CORTE POR INTERVALO</label>
           </div>
-          <div id="folderInfo" class="cm-folder mt-3 d-none">
-            <i class="bi bi-folder-check"></i>
-            <span id="folderName">—</span>
+
+          <div id="intervalFields" class="mt-3 d-none">
+            <div class="row g-3">
+              <div class="col-6">
+                <label class="cm-label" for="intervalStart">TIEMPO DE INICIO</label>
+                <input id="intervalStart" type="text" class="form-control cm-time" inputmode="decimal"
+                       placeholder="00:00:35.000" autocomplete="off" spellcheck="false" />
+              </div>
+              <div class="col-6">
+                <label class="cm-label" for="intervalEnd">TIEMPO DE FINALIZACIÓN</label>
+                <input id="intervalEnd" type="text" class="form-control cm-time" inputmode="decimal"
+                       placeholder="00:01:20.000" autocomplete="off" spellcheck="false" />
+              </div>
+            </div>
+            <div class="d-flex gap-2 mt-2">
+              <button type="button" class="btn btn-sm cm-btn-ghost" id="intervalFullBtn">
+                <i class="bi bi-arrows-fullscreen"></i> Canción completa
+              </button>
+            </div>
+            <div id="intervalError" class="cm-error mt-2 d-none"></div>
+            <div id="intervalInfo" class="cm-hint mt-2"></div>
           </div>
-          <div class="cm-hint mt-2">
-            Si no eliges carpeta, podrás descargar cada fragmento o todos en un ZIP.
-            Chrome pedirá permiso de escritura la primera vez.
+
+          <div id="intervalHint" class="cm-hint mt-2">
+            Extiende un único archivo entre los dos tiempos indicados.
+            Al activarlo, el panel de Partes queda desactivado.
           </div>
         </div>
       </div>
@@ -246,9 +262,6 @@
             <button id="zipBtn" class="btn cm-btn-primary" type="button">
               <i class="bi bi-file-zip"></i> Descargar ZIP
             </button>
-            <button id="saveAllBtn" class="btn cm-btn-outline d-none" type="button">
-              <i class="bi bi-folder-check"></i> Guardar en la carpeta
-            </button>
             <button id="restartBtn" class="btn cm-btn-ghost" type="button">
               <i class="bi bi-arrow-counterclockwise"></i> Volver al inicio
             </button>
@@ -262,7 +275,7 @@
 
   <footer class="cm-footer">
     <span><i class="bi bi-lock-fill"></i> Todo se procesa en tu equipo. Nada se sube a ningún servidor.</span>
-    <span class="cm-muted">Cut Music 1.0 · FFmpeg.wasm</span>
+    <span class="cm-muted">Cut Music 1.1.0 · FFmpeg.wasm</span>
   </footer>
 </main>
 

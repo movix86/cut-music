@@ -1,16 +1,16 @@
 /* ============================================================
-   CUT MUSIC 1.0 — aplicación
+   CUT MUSIC 1.1.0 — aplicación
    ============================================================ */
-import { parseChunk, formatTime, formatTimeShort, formatBytes } from './validation.js';
+import {
+  parseChunk, formatTime, formatTimeShort, formatBytes, parseTimestamp, formatTimestamp,
+} from './validation.js';
 import { computePlan, segmentName, MODE } from './splitter-engine.js';
 import { isAudioFile, describeFile, readDuration, readArrayBuffer, bindDropZone, readFileFromInput } from './file-manager.js';
 import { AudioWorkerClient } from './worker-manager.js';
-import {
-  downloadBlob, makeZip, pickDirectory, ensureWritePermission, writeFileToDirectory,
-  supportsDirectoryPicker, sanitizeFilename,
-} from './export-manager.js';
+import { downloadBlob, makeZip, sanitizeFilename } from './export-manager.js';
 
 const $ = (id) => document.getElementById(id);
+const APP_VERSION = '1.1.0';
 
 const FORMATS = [
   { id: 'mp3',  label: 'MP3',  lossy: true,  encoder: 'libmp3lame', mime: 'audio/mpeg' },
@@ -33,7 +33,6 @@ const state = {
   format: 'mp3',
   bitrate: 192,
   sampleRate: 44100,
-  dirHandle: null,
   results: [],
   busy: false,
   cancelled: false,
@@ -41,6 +40,9 @@ const state = {
   workerReady: false,
   encoders: null,
   remainderChosen: false,
+  // v1.1.0 — corte por intervalo (excluyente con la división por partes)
+  intervalMode: false,
+  interval: null,
 };
 
 const el = {
@@ -53,14 +55,17 @@ const el = {
   remainderInfo: $('remainderInfo'),
   formatSelect: $('formatSelect'), rateSelect: $('rateSelect'),
   bitrateRow: $('bitrateRow'), bitrateSelect: $('bitrateSelect'), formatHint: $('formatHint'),
-  pickFolderBtn: $('pickFolderBtn'), clearFolderBtn: $('clearFolderBtn'),
-  folderInfo: $('folderInfo'), folderName: $('folderName'),
+  partsCard: $('partsCard'), partsBody: $('partsBody'), partsInactive: $('partsInactive'),
+  intervalToggle: $('intervalToggle'), intervalFields: $('intervalFields'),
+  intervalStart: $('intervalStart'), intervalEnd: $('intervalEnd'),
+  intervalError: $('intervalError'), intervalInfo: $('intervalInfo'), intervalHint: $('intervalHint'),
+  intervalFullBtn: $('intervalFullBtn'),
   splitBtn: $('splitBtn'), globalError: $('globalError'),
   progressCard: $('progressCard'), progressBar: $('progressBar'), progressPercent: $('progressPercent'),
   progressFragment: $('progressFragment'), progressEta: $('progressEta'), progressPhase: $('progressPhase'),
   progressDetail: $('progressDetail'), cancelBtn: $('cancelBtn'),
   resultsCard: $('resultsCard'), resultsList: $('resultsList'), resultsMeta: $('resultsMeta'),
-  zipBtn: $('zipBtn'), saveAllBtn: $('saveAllBtn'), restartBtn: $('restartBtn'),
+  zipBtn: $('zipBtn'), restartBtn: $('restartBtn'),
   installBtn: $('installBtn'),
   remainderModal: $('remainderModal'), remainderText: $('remainderText'),
   separateDesc: $('separateDesc'), mergeDesc: $('mergeDesc'),
@@ -188,6 +193,9 @@ async function selectFile(file) {
   if (state.duration) {
     el.fileDuration.textContent = formatTime(state.duration, 2);
     el.fileStatus.textContent = 'Listo';
+    if (state.intervalMode && !el.intervalEnd.value.trim()) {
+      el.intervalEnd.value = formatTimestamp(state.duration);
+    }
   } else {
     el.fileDuration.textContent = 'Desconocida';
     el.fileStatus.textContent = 'Formato no reconocido';
@@ -213,8 +221,100 @@ function clearFile() {
   clearError();
 }
 
+/* ---------------- v1.1.0: corte por intervalo ---------------- */
+function setIntervalMode(on) {
+  state.intervalMode = Boolean(on);
+  el.intervalToggle.checked = state.intervalMode;
+  el.intervalFields.classList.toggle('d-none', !state.intervalMode);
+  el.intervalHint.classList.toggle('d-none', state.intervalMode);
+
+  // Exclusividad: el panel de partes queda inactivo mientras el intervalo esté activo.
+  el.partsCard.classList.toggle('cm-inactive', state.intervalMode);
+  el.partsInactive.classList.toggle('d-none', !state.intervalMode);
+  el.chunkInput.disabled = state.intervalMode;
+  el.chips.querySelectorAll('button').forEach((b) => { b.disabled = state.intervalMode; });
+
+  if (state.intervalMode) {
+    if (!el.intervalStart.value.trim()) el.intervalStart.value = formatTimestamp(0);
+    if (!el.intervalEnd.value.trim() && state.duration) el.intervalEnd.value = formatTimestamp(state.duration);
+    el.intervalStart.focus();
+    el.intervalStart.select();
+  }
+
+  el.splitBtn.innerHTML = state.intervalMode
+    ? '<i class="bi bi-clock-history"></i> CORTAR INTERVALO'
+    : '<i class="bi bi-scissors"></i> DIVIDIR CANCIÓN';
+
+  state.remainderChosen = false;
+  updateSummary();
+  updateSplitButton();
+}
+
+function validateInterval() {
+  if (!state.file) return { ok: false, error: 'Carga primero una canción.' };
+  if (!state.duration) return { ok: false, error: 'No se conoce la duración de la canción.' };
+
+  const start = parseTimestamp(el.intervalStart.value);
+  if (!start.ok) return { ok: false, error: 'Tiempo de inicio: ' + start.error };
+
+  const end = parseTimestamp(el.intervalEnd.value);
+  if (!end.ok) return { ok: false, error: 'Tiempo de finalización: ' + end.error };
+
+  if (start.value >= end.value) {
+    return { ok: false, error: 'El tiempo final debe ser superior al tiempo inicial.' };
+  }
+  if (end.value > state.duration + 0.001) {
+    return {
+      ok: false,
+      error: `El tiempo final no puede superar la duración de la canción (${formatTimestamp(state.duration)}).`,
+    };
+  }
+  const dur = end.value - start.value;
+  if (dur <= 0.0005) {
+    return { ok: false, error: 'El intervalo debe tener una duración mayor que cero.' };
+  }
+  return { ok: true, start: start.value, end: end.value, dur };
+}
+
+function updateIntervalUI() {
+  if (!state.intervalMode) {
+    el.intervalError.classList.add('d-none');
+    return;
+  }
+  const v = validateInterval();
+  const startInvalid = !v.ok && /inicio/i.test(v.error || '');
+  const endInvalid = !v.ok && /finalizaci/i.test(v.error || '');
+  el.intervalStart.classList.toggle('is-invalid', startInvalid);
+  el.intervalEnd.classList.toggle('is-invalid', endInvalid);
+  el.intervalError.classList.toggle('d-none', v.ok);
+
+  if (!v.ok) {
+    el.intervalError.textContent = v.error;
+    el.intervalInfo.textContent = 'Se generará un único archivo con el intervalo indicado.';
+    state.interval = null;
+    return;
+  }
+  state.interval = v;
+  el.intervalInfo.textContent =
+    `Se generará 1 archivo de ${formatTime(v.dur, 2)} (${formatTimestamp(v.start)} → ${formatTimestamp(v.end)}).`;
+}
+
 /* ---------------- resumen ---------------- */
 function updateSummary() {
+  if (state.intervalMode) {
+    updateIntervalUI();
+    el.chunkInput.classList.remove('is-invalid');
+    el.chunkError.classList.add('d-none');
+    el.sumFull.textContent = '—';
+    el.sumLast.textContent = '—';
+    el.sumTotal.textContent = '1';
+    el.remainderInfo.classList.add('d-none');
+    state.plan = state.interval
+      ? { segments: [{ start: state.interval.start, dur: state.interval.dur }], total: 1, lastDuration: state.interval.dur, hasRemainder: false }
+      : null;
+    return;
+  }
+
   const chunk = parseChunk(el.chunkInput.value);
   el.chunkInput.classList.toggle('is-invalid', !chunk.ok);
   el.chunkError.classList.toggle('d-none', chunk.ok);
@@ -262,13 +362,20 @@ function updateSummary() {
 }
 
 function updateSplitButton() {
-  const chunk = parseChunk(el.chunkInput.value);
-  const ready = Boolean(state.file && state.duration && chunk.ok && state.workerReady && !state.busy);
+  let ready;
+  if (state.intervalMode) {
+    ready = Boolean(state.file && state.duration && state.workerReady && !state.busy && validateInterval().ok);
+  } else {
+    const chunk = parseChunk(el.chunkInput.value);
+    ready = Boolean(state.file && state.duration && chunk.ok && state.workerReady && !state.busy);
+  }
   el.splitBtn.disabled = !ready;
   if (!state.workerReady && state.file) {
     el.splitBtn.title = 'Cargando el motor de audio…';
   } else if (!state.file) {
     el.splitBtn.title = 'Elige primero una canción';
+  } else if (state.intervalMode && !validateInterval().ok) {
+    el.splitBtn.title = 'Revisa los tiempos del intervalo';
   } else {
     el.splitBtn.title = '';
   }
@@ -317,8 +424,16 @@ async function startSplit() {
   if (!state.file) { showError('Elige una canción primero.'); return; }
   if (!state.duration) { showError('No se conoce la duración de la canción.'); return; }
 
-  const chunk = parseChunk(el.chunkInput.value);
-  if (!chunk.ok) { showError(chunk.error); return; }
+  let interval = null;
+  let chunk = null;
+  if (state.intervalMode) {
+    interval = validateInterval();
+    updateIntervalUI();
+    if (!interval.ok) { showError(interval.error); return; }
+  } else {
+    chunk = parseChunk(el.chunkInput.value);
+    if (!chunk.ok) { showError(chunk.error); return; }
+  }
 
   try {
     // FFmpeg.wasm acumula memoria entre ejecuciones: motor nuevo en cada corte.
@@ -335,24 +450,41 @@ async function startSplit() {
     return;
   }
 
-  let plan = computePlan(state.duration, chunk.value, MODE.SEPARATE);
-  if (plan.hasRemainder) {
-    const mode = await askRemainder(plan);
-    if (!mode) return;
-    state.mode = mode;
-    state.remainderChosen = true;
-    plan = computePlan(state.duration, chunk.value, mode);
+  let plan;
+  let safeNames;
+  if (state.intervalMode) {
+    state.interval = interval;
+    plan = {
+      segments: [{ start: interval.start, dur: interval.dur }],
+      total: 1,
+      full: 0,
+      remainder: 0,
+      lastDuration: interval.dur,
+      hasRemainder: false,
+      mode: 'interval',
+    };
   } else {
-    state.mode = MODE.SEPARATE;
-    state.remainderChosen = false;
+    plan = computePlan(state.duration, chunk.value, MODE.SEPARATE);
+    if (plan.hasRemainder) {
+      const mode = await askRemainder(plan);
+      if (!mode) return;
+      state.mode = mode;
+      state.remainderChosen = true;
+      plan = computePlan(state.duration, chunk.value, mode);
+    } else {
+      state.mode = MODE.SEPARATE;
+      state.remainderChosen = false;
+    }
+    state.chunk = chunk.value;
   }
-  state.chunk = chunk.value;
   state.plan = plan;
   updateSummary();
 
   const fmt = currentFormat();
-  const names = plan.segments.map((_, i) => `${state.desc.base}_Parte_${String(i + 1).padStart(Math.max(3, String(plan.total).length), '0')}.${fmt.id}`);
-  const safeNames = names.map((n) => sanitizeFilename(n));
+  const names = state.intervalMode
+    ? [`${state.desc.base}_Intervalo.${fmt.id}`]
+    : plan.segments.map((_, i) => `${state.desc.base}_Parte_${String(i + 1).padStart(Math.max(3, String(plan.total).length), '0')}.${fmt.id}`);
+  safeNames = names.map((n) => sanitizeFilename(n));
 
   state.results = [];
   state.busy = true;
@@ -375,7 +507,6 @@ async function startSplit() {
   }
 
   const startedAt = performance.now();
-  const dir = state.dirHandle;
 
   const finishOk = () => {
     state.busy = false;
@@ -468,22 +599,6 @@ async function startSplit() {
     if (failed) {
       showError(`${failed} fragmento(s) no se pudieron codificar por falta de memoria. Prueba con fragmentos más largos o una canción más corta.`);
     }
-
-    if (dir) {
-      el.progressDetail.textContent = 'Guardando en la carpeta seleccionada…';
-      const ok = await ensureWritePermission(dir);
-      if (ok) {
-        let fails = 0;
-        for (const r of state.results) {
-          if (!r.blob) continue;
-          try { await writeFileToDirectory(dir, r.name, r.blob); }
-          catch (e) { fails++; }
-        }
-        if (fails) showError(`No se pudieron guardar ${fails} archivo(s) en la carpeta. Puedes descargarlos abajo.`);
-      } else {
-        showError('Chrome no concedió permiso para guardar en la carpeta. Descarga los archivos abajo.');
-      }
-    }
   } catch (error) {
     showError('Error durante el procesamiento: ' + error.message);
     resetBusy();
@@ -517,7 +632,6 @@ function showResults() {
     });
   });
 
-  el.saveAllBtn.classList.toggle('d-none', !state.dirHandle);
   el.resultsCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
@@ -562,29 +676,22 @@ function bindEvents() {
   el.bitrateSelect.addEventListener('change', () => { state.bitrate = Number(el.bitrateSelect.value); });
   el.rateSelect.addEventListener('change', () => { state.sampleRate = Number(el.rateSelect.value); });
 
-  el.pickFolderBtn.addEventListener('click', async () => {
-    clearError();
-    try {
-      const handle = await pickDirectory();
-      const ok = await ensureWritePermission(handle);
-      if (!ok) { showError('Chrome no concedió permiso de escritura sobre la carpeta.'); return; }
-      state.dirHandle = handle;
-      el.folderInfo.classList.remove('d-none');
-      el.folderName.textContent = handle.name || 'Carpeta seleccionada';
-      el.clearFolderBtn.classList.remove('d-none');
-      el.saveAllBtn.classList.toggle('d-none', state.results.length === 0);
-    } catch (error) {
-      if (error && error.name === 'AbortError') return;
-      showError('No se pudo usar la carpeta: ' + error.message + ' Podrás descargar en ZIP.');
-    }
+  // v1.1.0 — interruptor y tiempos del corte por intervalo
+  el.intervalToggle.addEventListener('change', () => setIntervalMode(el.intervalToggle.checked));
+  [el.intervalStart, el.intervalEnd].forEach((input) => {
+    input.addEventListener('input', () => { updateIntervalUI(); updateSplitButton(); });
+    input.addEventListener('blur', () => {
+      const parsed = parseTimestamp(input.value);
+      if (parsed.ok) input.value = formatTimestamp(parsed.value);
+    });
+  });
+  el.intervalFullBtn.addEventListener('click', () => {
+    el.intervalStart.value = formatTimestamp(0);
+    el.intervalEnd.value = state.duration ? formatTimestamp(state.duration) : '';
+    updateIntervalUI();
+    updateSplitButton();
   });
 
-  el.clearFolderBtn.addEventListener('click', () => {
-    state.dirHandle = null;
-    el.folderInfo.classList.add('d-none');
-    el.clearFolderBtn.classList.add('d-none');
-    el.saveAllBtn.classList.add('d-none');
-  });
 
   el.splitBtn.addEventListener('click', startSplit);
   el.cancelBtn.addEventListener('click', () => {
@@ -600,26 +707,12 @@ function bindEvents() {
     try {
       el.zipBtn.disabled = true;
       const blob = await makeZip(ok.map((r) => ({ name: r.name, blob: r.blob })));
-      downloadBlob(blob, `${state.desc.base}_partes.zip`);
+      downloadBlob(blob, `${state.desc.base}_${state.intervalMode ? 'intervalo' : 'partes'}.zip`);
     } catch (error) {
       showError('No se pudo crear el ZIP: ' + error.message);
     } finally {
       el.zipBtn.disabled = false;
     }
-  });
-
-  el.saveAllBtn.addEventListener('click', async () => {
-    if (!state.dirHandle) return;
-    const ok = await ensureWritePermission(state.dirHandle);
-    if (!ok) { showError('Chrome no concedió permiso para escribir en la carpeta.'); return; }
-    let fails = 0;
-    for (const r of state.results) {
-      if (!r.blob) continue;
-      try { await writeFileToDirectory(state.dirHandle, r.name, r.blob); }
-      catch (e) { fails++; }
-    }
-    if (fails) showError(`No se pudieron guardar ${fails} archivo(s).`);
-    else el.progressDetail.textContent = 'Guardado en la carpeta seleccionada.';
   });
 
   el.restartBtn.addEventListener('click', () => {
@@ -664,10 +757,8 @@ function boot() {
   populateFormats();
   updateSummary();
   updateSplitButton();
-  if (!supportsDirectoryPicker()) {
-    el.pickFolderBtn.disabled = true;
-    el.pickFolderBtn.title = 'Este navegador no soporta File System Access API; usa el ZIP.';
-  }
+  const versionNode = document.querySelector('.cm-version');
+  if (versionNode) versionNode.textContent = APP_VERSION;
   el.bitrateSelect.value = String(state.bitrate);
   el.rateSelect.value = String(state.sampleRate);
 }
