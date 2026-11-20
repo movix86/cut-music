@@ -422,3 +422,78 @@ body {
 .cm-time.is-invalid { border-color: var(--cm-danger); }
 .cm-card.cm-inactive { opacity: 0.55; }
 .cm-card.cm-inactive .cm-card-body { pointer-events: none; }
+/* ---------- v1.1.0: editor visual (forma de onda) ---------- */
+.cm-wave-wrap {
+  position: relative;
+  height: 140px;
+  border: 1px solid var(--cm-border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: #0b0f17;
+  touch-action: none;
+  user-select: none;
+}
+#waveCanvas { display: block; width: 100%; height: 100%; }
+.cm-marker {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--cm-accent);
+  cursor: ew-resize;
+  transform: translateX(-1px);
+}
+.cm-marker::after {
+  content: '';
+  position: absolute;
+  top: -1px;
+  left: 50%;
+  transform: translateX(-50%);
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-top: 10px solid var(--cm-accent);
+}
+.cm-marker:hover, .cm-marker.dragging { background: var(--cm-accent-2); }
+.cm-marker:hover::after, .cm-marker.dragging::after { border-top-color: var(--cm-accent-2); }
+.cm-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: #ffe9a8;
+  pointer-events: none;
+  transform: translateX(-1px);
+  display: none;
+}
+.cm-playhead.visible { display: block; }
+.cm-wave-times {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+  font-size: 0.72rem;
+  color: var(--cm-muted);
+  font-variant-numeric: tabular-nums;
+}
+.cm-playbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--cm-border);
+  border-radius: 10px;
+  background: #0e131c;
+}
+.cm-btn-icon {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 122, 26, 0.12);
+  border: 1px solid rgba(255, 122, 26, 0.45);
+  color: var(--cm-accent);
+  border-radius: 9px;
+  font-size: 1.05rem;
+}
+.cm-btn-icon:hover { background: rgba(255, 122, 26, 0.22); color: var(--cm-accent-2); }
+.cm-btn-icon:disabled { opacity: 0.4; }
+.cm-playtime { font-variant-numeric: tabular-nums; font-size: 0.82rem; }

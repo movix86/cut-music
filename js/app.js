@@ -8,6 +8,7 @@ import { computePlan, segmentName, MODE } from './splitter-engine.js';
 import { isAudioFile, describeFile, readDuration, readArrayBuffer, bindDropZone, readFileFromInput } from './file-manager.js';
 import { AudioWorkerClient } from './worker-manager.js';
 import { downloadBlob, makeZip, sanitizeFilename } from './export-manager.js';
+import { buildPeaks, WaveView } from './wave-editor.js';
 
 const $ = (id) => document.getElementById(id);
 const APP_VERSION = '1.1.0';
@@ -43,6 +44,7 @@ const state = {
   // v1.1.0 — corte por intervalo (excluyente con la división por partes)
   intervalMode: false,
   interval: null,
+  wave: { key: null, peaks: null, duration: 0, loadingKey: null },
 };
 
 const el = {
@@ -60,6 +62,12 @@ const el = {
   intervalStart: $('intervalStart'), intervalEnd: $('intervalEnd'),
   intervalError: $('intervalError'), intervalInfo: $('intervalInfo'), intervalHint: $('intervalHint'),
   intervalFullBtn: $('intervalFullBtn'),
+  waveBlock: $('waveBlock'), waveWrap: $('waveWrap'), waveCanvas: $('waveCanvas'),
+  waveStatus: $('waveStatus'), waveStartLabel: $('waveStartLabel'),
+  waveSelectionLabel: $('waveSelectionLabel'), waveEndLabel: $('waveEndLabel'),
+  markerStart: $('markerStart'), markerEnd: $('markerEnd'), playhead: $('playhead'),
+  playBar: $('playBar'), playBtn: $('playBtn'), pauseBtn: $('pauseBtn'), stopBtn: $('stopBtn'),
+  playTime: $('playTime'), playSpan: $('playSpan'),
   splitBtn: $('splitBtn'), globalError: $('globalError'),
   progressCard: $('progressCard'), progressBar: $('progressBar'), progressPercent: $('progressPercent'),
   progressFragment: $('progressFragment'), progressEta: $('progressEta'), progressPhase: $('progressPhase'),
@@ -160,6 +168,17 @@ async function selectFile(file) {
   state.remainderChosen = false;
   state.results = [];
 
+  // Reinicia el editor visual y la previsualización para el nuevo archivo.
+  previewPlaying = false;
+  if (previewRaf) { cancelAnimationFrame(previewRaf); previewRaf = 0; }
+  if (previewAudio) {
+    try { previewAudio.pause(); previewAudio.removeAttribute('src'); previewAudio.load(); } catch (e) { /* noop */ }
+  }
+  if (previewUrl) { URL.revokeObjectURL(previewUrl); previewUrl = null; }
+  state.wave = { key: null, peaks: null, duration: 0, loadingKey: null };
+  if (waveView) waveView.clear();
+  showWaveUI(false);
+
   el.fileInfo.classList.remove('d-none');
   el.fileName.textContent = file.name;
   el.fileFormat.textContent = state.desc.ext.toUpperCase();
@@ -203,9 +222,19 @@ async function selectFile(file) {
 
   updateSummary();
   updateSplitButton();
+  if (state.intervalMode) ensureWaveform();
 }
 
 function clearFile() {
+  stopPreview();
+  if (previewUrl) { URL.revokeObjectURL(previewUrl); previewUrl = null; }
+  if (previewAudio) {
+    try { previewAudio.removeAttribute('src'); previewAudio.load(); } catch (e) { /* noop */ }
+  }
+  state.wave = { key: null, peaks: null, duration: 0, loadingKey: null };
+  if (waveView) waveView.clear();
+  showWaveUI(false);
+  el.playhead.classList.remove('visible');
   state.file = null;
   state.desc = null;
   state.duration = null;
@@ -239,6 +268,10 @@ function setIntervalMode(on) {
     if (!el.intervalEnd.value.trim() && state.duration) el.intervalEnd.value = formatTimestamp(state.duration);
     el.intervalStart.focus();
     el.intervalStart.select();
+  } else {
+    stopPreview();
+    showWaveUI(false);
+    el.playhead.classList.remove('visible');
   }
 
   el.splitBtn.innerHTML = state.intervalMode
@@ -248,6 +281,8 @@ function setIntervalMode(on) {
   state.remainderChosen = false;
   updateSummary();
   updateSplitButton();
+
+  if (state.intervalMode) ensureWaveform();
 }
 
 function validateInterval() {
@@ -279,6 +314,7 @@ function validateInterval() {
 function updateIntervalUI() {
   if (!state.intervalMode) {
     el.intervalError.classList.add('d-none');
+    updatePlayButtons();
     return;
   }
   const v = validateInterval();
@@ -292,11 +328,233 @@ function updateIntervalUI() {
     el.intervalError.textContent = v.error;
     el.intervalInfo.textContent = 'Se generará un único archivo con el intervalo indicado.';
     state.interval = null;
+    updatePlayButtons();
     return;
   }
   state.interval = v;
   el.intervalInfo.textContent =
     `Se generará 1 archivo de ${formatTime(v.dur, 2)} (${formatTimestamp(v.start)} → ${formatTimestamp(v.end)}).`;
+  positionMarkers(v);
+  updateWaveLabels(v);
+  updatePlayButtons();
+}
+
+/* ---------------- v1.1.0: forma de onda y reproducción ---------------- */
+const MIN_SELECTION = 0.01;
+let waveView = null;
+let previewAudio = null;
+let previewUrl = null;
+let previewPlaying = false;
+let previewRaf = 0;
+
+function positionMarkers(v) {
+  if (!state.duration) return;
+  const pct = (t) => `${Math.min(100, Math.max(0, (t / state.duration) * 100))}%`;
+  el.markerStart.style.left = pct(v.start);
+  el.markerEnd.style.left = pct(v.end);
+  if (waveView) waveView.setSelection(v.start, v.end);
+  if (!previewPlaying) setHead(v.start);
+}
+
+function updateWaveLabels(v) {
+  el.waveStartLabel.textContent = formatTimestamp(v.start);
+  el.waveEndLabel.textContent = formatTimestamp(v.end);
+  el.waveSelectionLabel.textContent = formatTime(v.dur, 2);
+  el.playSpan.textContent = formatTimestamp(v.dur);
+}
+
+function setHead(seconds) {
+  const total = state.duration || 1;
+  el.playhead.classList.add('visible');
+  el.playhead.style.left = `${Math.min(100, Math.max(0, (seconds / total) * 100))}%`;
+  el.playTime.textContent = formatTimestamp(seconds);
+  if (waveView) waveView.setHead(seconds);
+}
+
+function updatePlayButtons() {
+  const valid = Boolean(state.intervalMode && state.file && state.interval);
+  if (el.playBtn) el.playBtn.disabled = !valid || previewPlaying;
+  if (el.pauseBtn) el.pauseBtn.disabled = !valid || !previewPlaying;
+  if (el.stopBtn) el.stopBtn.disabled = !valid;
+}
+
+function ensurePreviewAudio() {
+  if (previewAudio) return previewAudio;
+  previewAudio = new Audio();
+  previewAudio.preload = 'auto';
+  return previewAudio;
+}
+
+function setPreviewSource() {
+  if (!state.file) return;
+  if (previewUrl) URL.revokeObjectURL(previewUrl);
+  previewUrl = URL.createObjectURL(state.file);
+  ensurePreviewAudio().src = previewUrl;
+}
+
+function pausePreview() {
+  if (!previewAudio || !previewPlaying) return;
+  previewAudio.pause();
+  previewPlaying = false;
+  if (previewRaf) { cancelAnimationFrame(previewRaf); previewRaf = 0; }
+  setHead(previewAudio.currentTime);
+  updatePlayButtons();
+}
+
+function stopPreview() {
+  previewPlaying = false;
+  if (previewRaf) { cancelAnimationFrame(previewRaf); previewRaf = 0; }
+  if (previewAudio) {
+    previewAudio.pause();
+    const v = validateInterval();
+    const start = v.ok ? v.start : 0;
+    try { previewAudio.currentTime = start; } catch (e) { /* noop */ }
+    setHead(start);
+  }
+  updatePlayButtons();
+}
+
+async function playInterval() {
+  const v = validateInterval();
+  if (!v.ok) return;
+  if (!previewUrl) setPreviewSource();
+  const audio = ensurePreviewAudio();
+
+  if (!previewPlaying && (audio.currentTime < v.start - 0.02 || audio.currentTime >= v.end - 0.02)) {
+    audio.currentTime = v.start;
+  }
+  try {
+    await audio.play();
+  } catch (error) {
+    showError('No se pudo reproducir el audio: ' + error.message);
+    return;
+  }
+  previewPlaying = true;
+  updatePlayButtons();
+  tickPreview();
+}
+
+function tickPreview() {
+  if (!previewPlaying) return;
+  const v = validateInterval();
+  if (!v.ok) { stopPreview(); return; }
+
+  const audio = previewAudio;
+  const t = audio.currentTime;
+  if (t >= v.end - 0.02) {
+    audio.pause();
+    try { audio.currentTime = v.end; } catch (e) { /* noop */ }
+    previewPlaying = false;
+    setHead(v.end);
+    updatePlayButtons();
+    return;
+  }
+  setHead(t);
+  previewRaf = requestAnimationFrame(tickPreview);
+}
+
+function markerSecondsFromX(clientX) {
+  const rect = el.waveWrap.getBoundingClientRect();
+  if (!rect.width) return 0;
+  const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+  return ratio * (state.duration || 0);
+}
+
+function applyMarkerDrag(which, seconds) {
+  if (!state.intervalMode || !state.duration) return;
+  const v = validateInterval();
+  const curStart = v.ok ? v.start : 0;
+  const curEnd = v.ok ? v.end : state.duration;
+
+  if (previewPlaying) stopPreview();
+
+  if (which === 'start') {
+    const start = Math.min(Math.max(0, seconds), curEnd - MIN_SELECTION);
+    el.intervalStart.value = formatTimestamp(start);
+  } else {
+    const end = Math.max(Math.min(state.duration, seconds), curStart + MIN_SELECTION);
+    el.intervalEnd.value = formatTimestamp(end);
+  }
+  updateIntervalUI();
+  updateSplitButton();
+
+  if (state.interval && previewAudio) {
+    try { previewAudio.currentTime = state.interval.start; } catch (e) { /* noop */ }
+    setHead(state.interval.start);
+  }
+}
+
+function bindMarkerDrag(marker, which) {
+  marker.addEventListener('pointerdown', (event) => {
+    if (!state.intervalMode || !state.duration) return;
+    event.preventDefault();
+    try { marker.setPointerCapture(event.pointerId); } catch (e) { /* puntero sintetico */ }
+    marker.classList.add('dragging');
+    const move = (e) => applyMarkerDrag(which, markerSecondsFromX(e.clientX));
+    const up = () => {
+      marker.classList.remove('dragging');
+      marker.removeEventListener('pointermove', move);
+      marker.removeEventListener('pointerup', up);
+      marker.removeEventListener('pointercancel', up);
+    };
+    marker.addEventListener('pointermove', move);
+    marker.addEventListener('pointerup', up);
+    marker.addEventListener('pointercancel', up);
+    applyMarkerDrag(which, markerSecondsFromX(event.clientX));
+  });
+}
+
+function showWaveUI(show) {
+  el.waveBlock.classList.toggle('d-none', !show);
+  el.playBar.classList.toggle('d-none', !show);
+}
+
+async function ensureWaveform() {
+  if (!state.file || !state.duration || !state.intervalMode) return;
+  const key = `${state.file.name}:${state.file.size}:${state.file.lastModified}`;
+
+  if (state.wave.key === key && state.wave.peaks) {
+    waveView.setData(state.wave.peaks, state.wave.duration);
+    showWaveUI(true);
+    el.waveStatus.textContent = 'Lista';
+    if (state.interval) positionMarkers(state.interval);
+    return;
+  }
+  if (state.wave.loadingKey === key) return;
+
+  if (state.duration > 900 || state.file.size > 200 * 1024 * 1024) {
+    el.waveStatus.textContent = 'No disponible para archivos muy largos';
+    showWaveUI(true);
+    return;
+  }
+
+  state.wave.loadingKey = key;
+  el.waveStatus.textContent = 'Generando forma de onda…';
+  showWaveUI(true);
+
+  try {
+    const { peaks, duration } = await buildPeaks(state.file, 1400);
+    if (!state.file || `${state.file.name}:${state.file.size}:${state.file.lastModified}` !== key) return;
+    state.wave = { key, peaks, duration, loadingKey: null };
+    waveView.setData(peaks, duration);
+    el.waveStatus.textContent = 'Lista';
+    if (state.interval) positionMarkers(state.interval);
+  } catch (error) {
+    state.wave.loadingKey = null;
+    el.waveStatus.textContent = 'No disponible';
+    el.intervalError.classList.remove('d-none');
+    el.intervalError.textContent = 'No se pudo generar la forma de onda: ' + error.message;
+  }
+}
+
+function handleIntervalFieldInput() {
+  if (previewPlaying) stopPreview();
+  updateIntervalUI();
+  updateSplitButton();
+  if (state.interval && previewAudio) {
+    try { previewAudio.currentTime = state.interval.start; } catch (e) { /* noop */ }
+    setHead(state.interval.start);
+  }
 }
 
 /* ---------------- resumen ---------------- */
@@ -679,7 +937,7 @@ function bindEvents() {
   // v1.1.0 — interruptor y tiempos del corte por intervalo
   el.intervalToggle.addEventListener('change', () => setIntervalMode(el.intervalToggle.checked));
   [el.intervalStart, el.intervalEnd].forEach((input) => {
-    input.addEventListener('input', () => { updateIntervalUI(); updateSplitButton(); });
+    input.addEventListener('input', handleIntervalFieldInput);
     input.addEventListener('blur', () => {
       const parsed = parseTimestamp(input.value);
       if (parsed.ok) input.value = formatTimestamp(parsed.value);
@@ -688,9 +946,14 @@ function bindEvents() {
   el.intervalFullBtn.addEventListener('click', () => {
     el.intervalStart.value = formatTimestamp(0);
     el.intervalEnd.value = state.duration ? formatTimestamp(state.duration) : '';
-    updateIntervalUI();
-    updateSplitButton();
+    handleIntervalFieldInput();
   });
+
+  el.playBtn.addEventListener('click', playInterval);
+  el.pauseBtn.addEventListener('click', pausePreview);
+  el.stopBtn.addEventListener('click', stopPreview);
+  bindMarkerDrag(el.markerStart, 'start');
+  bindMarkerDrag(el.markerEnd, 'end');
 
 
   el.splitBtn.addEventListener('click', startSplit);
@@ -752,6 +1015,10 @@ function bindPwa() {
 /* ---------------- arranque ---------------- */
 function boot() {
   remainderModal = new window.bootstrap.Modal(el.remainderModal, { backdrop: 'static', keyboard: false });
+  waveView = new WaveView(el.waveWrap, el.waveCanvas);
+  if (typeof ResizeObserver === 'function') {
+    new ResizeObserver(() => { if (waveView) waveView.resize(); }).observe(el.waveWrap);
+  }
   bindEvents();
   bindPwa();
   populateFormats();
@@ -763,5 +1030,5 @@ function boot() {
   el.rateSelect.value = String(state.sampleRate);
 }
 
-window.__CUTMUSIC__ = { state, selectFile, startSplit, clearFile };
+window.__CUTMUSIC__ = { state, selectFile, startSplit, clearFile, previewState: () => ({ playing: previewPlaying, current: previewAudio ? previewAudio.currentTime : null, start: state.interval ? state.interval.start : null, end: state.interval ? state.interval.end : null }) };
 boot();

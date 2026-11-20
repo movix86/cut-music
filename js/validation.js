@@ -95,11 +95,12 @@ export function parseTimestamp(raw) {
 
 /** Segundos -> "HH:MM:SS.mmm" */
 export function formatTimestamp(seconds) {
-  const total = Math.max(0, Number(seconds) || 0);
-  const h = Math.floor(total / 3600);
-  const m = Math.floor((total % 3600) / 60);
-  const s = Math.floor(total % 60);
-  const ms = Math.round((total - Math.floor(total)) * 1000);
+  // Se redondea primero a milisegundos para evitar "…:19.1000" por coma flotante.
+  const totalMs = Math.round(Math.max(0, Number(seconds) || 0) * 1000);
+  const h = Math.floor(totalMs / 3600000);
+  const m = Math.floor((totalMs % 3600000) / 60000);
+  const s = Math.floor((totalMs % 60000) / 1000);
+  const ms = totalMs % 1000;
   const pad = (n, w = 2) => String(n).padStart(w, '0');
   return `${pad(h)}:${pad(m)}:${pad(s)}.${pad(ms, 3)}`;
 }

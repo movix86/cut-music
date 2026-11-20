@@ -56,14 +56,22 @@ Hace falta servirse por HTTP en `localhost` (Chrome exige origen seguro para PWA
 
 Nombres: `Cancion_Parte_001.mp3`, `Cancion_Parte_002.mp3`…
 
-### B) Corte por intervalo (nuevo en 1.1.0)
+### B) Corte por intervalo con editor visual (1.1.0)
 
 1. Carga la canción.
 2. Activa **ACTIVAR CORTE POR INTERVALO** en el panel **4 · Corte por intervalo**.
-3. Introduce **inicio** y **finalización** con formato `HH:MM:SS.mmm`
-   (también acepta `MM:SS`, segundos sueltos o decimales con coma: `2,5`).
-4. Pulsa **CORTAR INTERVALO**: se genera un único archivo
+3. La app dibuja la **forma de onda** completa y coloca dos **marcadores**
+   (inicio y final), que puedes arrastrar con el ratón.
+4. Los campos de tiempo `HH:MM:SS.mmm` y los marcadores están **sincronizados en
+   ambos sentidos** (también acepta `MM:SS`, segundos sueltos o decimales con coma).
+5. Usa **Play / Pause / Stop** para escuchar **solo el intervalo**: la reproducción
+   se detiene automáticamente al llegar al marcador final. La línea fina sobre la
+   onda indica la posición actual.
+6. Pulsa **CORTAR INTERVALO**: se genera un único archivo
    `Cancion_Intervalo.<formato>` con la duración `fin − inicio`.
+
+Cambiar los marcadores o los tiempos durante la reproducción detiene el audio y
+actualiza los límites para la siguiente escucha.
 
 Al activar el intervalo, el panel **2 · Partes** queda desactivado (y viceversa):
 los dos métodos nunca se ejecutan a la vez. El botón «Canción completa» rellena el
@@ -85,6 +93,7 @@ CutMusic/
 ├── css/styles.css
 ├── js/
 │   ├── app.js                 interfaz y orquestación
+│   ├── wave-editor.js         forma de onda (peaks + canvas)
 │   ├── validation.js          validaciones + tiempos HH:MM:SS.mmm
 │   ├── file-manager.js        arrastrar/soltar y metadatos
 │   ├── worker-manager.js      puente con el worker

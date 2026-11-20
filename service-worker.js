@@ -3,7 +3,7 @@
    Cachea el shell de la app y los recursos de la interfaz.
    El núcleo de FFmpeg (30 MB) se cachea la primera vez que se usa.
    ============================================================ */
-const VERSION = 'cutmusic-v1.1.0';
+const VERSION = 'cutmusic-v1.1.0-editor';
 const SHELL = [
   './',
   './index.html',
@@ -14,6 +14,7 @@ const SHELL = [
   './js/file-manager.js',
   './js/worker-manager.js',
   './js/splitter-engine.js',
+  './js/wave-editor.js',
   './js/export-manager.js',
   './workers/audio-worker.js',
   './vendor/bootstrap/bootstrap.min.css',
