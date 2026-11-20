@@ -6,13 +6,13 @@ export const EPS = 0.001;
 
 export function parseChunk(raw) {
   const text = String(raw ?? '').trim().replace(',', '.');
-  if (!text) return { ok: false, error: 'Indica la duración de cada fragmento.' };
-  if (!/^\d*\.?\d+$/.test(text)) return { ok: false, error: 'Usa solo números (por ejemplo 10 o 2.5).' };
+  if (!text) return { ok: false, error: 'val.chunkEmpty' };
+  if (!/^\d*\.?\d+$/.test(text)) return { ok: false, error: 'val.chunkFormat' };
   const value = Number(text);
-  if (!Number.isFinite(value)) return { ok: false, error: 'Duración no válida.' };
-  if (value <= 0) return { ok: false, error: 'La duración debe ser mayor que cero.' };
-  if (value < 0.1) return { ok: false, error: 'El mínimo es 0,1 segundos.' };
-  if (value > 86400) return { ok: false, error: 'El máximo es 86400 segundos (24 h).' };
+  if (!Number.isFinite(value)) return { ok: false, error: 'val.chunkInvalid' };
+  if (value <= 0) return { ok: false, error: 'val.chunkPositive' };
+  if (value < 0.1) return { ok: false, error: 'val.chunkMin' };
+  if (value > 86400) return { ok: false, error: 'val.chunkMax' };
   return { ok: true, value };
 }
 
@@ -63,9 +63,9 @@ export function baseName(name) {
 /** Convierte "00:00:35.000", "1:20", "35" o "2,5" a segundos. */
 export function parseTimestamp(raw) {
   const text = String(raw ?? '').trim().replace(',', '.');
-  if (!text) return { ok: false, error: 'El tiempo no puede estar vacío.' };
+  if (!text) return { ok: false, error: 'val.timeEmpty' };
   if (!/^\d{1,3}(:\d{1,2}){0,2}(\.\d{1,3})?$/.test(text)) {
-    return { ok: false, error: 'Formato no válido. Usa HH:MM:SS.mmm (ejemplo: 00:00:35.000).' };
+    return { ok: false, error: 'val.timeFormat' };
   }
   const parts = text.split(':');
   let hours = 0;
@@ -76,20 +76,20 @@ export function parseTimestamp(raw) {
     minutes = Number(parts[1]);
     seconds = Number(parts[2]);
     if (minutes > 59 || seconds >= 60) {
-      return { ok: false, error: 'Los minutos y segundos deben ser menores de 60.' };
+      return { ok: false, error: 'val.timeUnits' };
     }
   } else if (parts.length === 2) {
     minutes = Number(parts[0]);
     seconds = Number(parts[1]);
     if (seconds >= 60) {
-      return { ok: false, error: 'Los segundos deben ser menores de 60.' };
+      return { ok: false, error: 'val.timeSeconds' };
     }
   } else {
     seconds = Number(parts[0]);
   }
   const value = hours * 3600 + minutes * 60 + seconds;
-  if (!Number.isFinite(value)) return { ok: false, error: 'El tiempo no es válido.' };
-  if (value < 0) return { ok: false, error: 'El tiempo no puede ser negativo.' };
+  if (!Number.isFinite(value)) return { ok: false, error: 'val.timeInvalid' };
+  if (value < 0) return { ok: false, error: 'val.timeNegative' };
   return { ok: true, value };
 }
 

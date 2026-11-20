@@ -1,22 +1,25 @@
 /* ============================================================
-   CUT MUSIC 1.1.0 — forma de onda y lienzo del editor
+   CUT MUSIC 1.1.0 — forma de onda, zoom y lienzo del editor
    Solo dibujo: no toca FFmpeg ni la exportación.
    ============================================================ */
 
 const COLORS = {
   bg: '#0b0f17',
-  idle: '#3d4a63',
-  idleDim: '#2a3345',
+  outside: '#2a3345',
   selected: '#ff7a1a',
-  selectedSoft: 'rgba(255, 122, 26, 0.12)',
+  selectedSoft: 'rgba(255, 122, 26, 0.13)',
+  start: '#4da3ff',
+  end: '#ff7a1a',
   head: '#ffe9a8',
   text: '#8e9ab0',
 };
 
-/** Decodifica el audio una sola vez y devuelve picos normalizados. */
+const MAX_SCRUB_SECONDS = 600;
+
+/** Decodifica el audio una vez: picos normalizados + buffer mono para el scrubbing. */
 export async function buildPeaks(file, buckets = 1400) {
   const Ctx = window.AudioContext || window.webkitAudioContext;
-  if (!Ctx) throw new Error('Web Audio API no disponible en este navegador.');
+  if (!Ctx) throw new Error('Web Audio API not available.');
   const ctx = new Ctx();
   try {
     const arrayBuffer = await file.arrayBuffer();
@@ -26,6 +29,13 @@ export async function buildPeaks(file, buckets = 1400) {
     for (let c = 0; c < maxCh; c++) channels.push(buffer.getChannelData(c));
 
     const total = buffer.length;
+    const mono = new Float32Array(total);
+    const other = channels[1];
+    const main = channels[0];
+    for (let i = 0; i < total; i++) {
+      mono[i] = other ? (main[i] + other[i]) * 0.5 : main[i];
+    }
+
     const peaks = new Float32Array(buckets);
     const span = total / buckets;
     let globalMax = 0;
@@ -36,8 +46,7 @@ export async function buildPeaks(file, buckets = 1400) {
       const stride = Math.max(1, Math.floor((to - from) / 160));
       let max = 0;
       for (let i = from; i < to; i += stride) {
-        let v = Math.abs(channels[0][i]);
-        if (channels[1]) v = Math.max(v, Math.abs(channels[1][i]));
+        const v = Math.abs(mono[i]);
         if (v > max) max = v;
       }
       peaks[b] = max;
@@ -47,7 +56,13 @@ export async function buildPeaks(file, buckets = 1400) {
     if (globalMax > 0) {
       for (let i = 0; i < buckets; i++) peaks[i] = peaks[i] / globalMax;
     }
-    return { peaks, duration: buffer.duration };
+
+    const duration = buffer.duration;
+    const scrub = duration <= MAX_SCRUB_SECONDS
+      ? { data: mono, sampleRate: buffer.sampleRate, duration }
+      : null;
+
+    return { peaks, duration, scrub };
   } finally {
     try { await ctx.close(); } catch (e) { /* noop */ }
   }
@@ -63,6 +78,9 @@ export class WaveView {
     this.start = 0;
     this.end = 0;
     this.head = -1;
+    // Ventana visible (segundos) para el zoom.
+    this.viewStart = 0;
+    this.viewSpan = 0;
     this._raf = 0;
     this.resize();
   }
@@ -77,6 +95,12 @@ export class WaveView {
     this.peaks = null;
     this.duration = 0;
     this.head = -1;
+    this.draw();
+  }
+
+  setView(viewStart, viewSpan) {
+    this.viewStart = viewStart;
+    this.viewSpan = viewSpan > 0 ? viewSpan : (this.duration || 1);
     this.draw();
   }
 
@@ -124,45 +148,57 @@ export class WaveView {
       ctx.fillStyle = COLORS.text;
       ctx.font = '12px "Segoe UI", system-ui, sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText('Forma de onda no disponible', w / 2, h / 2);
+      ctx.fillText('—', w / 2, h / 2);
       return;
     }
 
+    const span = this.viewSpan > 0 ? this.viewSpan : this.duration;
+    const from = this.viewStart;
+    const to = from + span;
     const mid = h / 2;
     const amp = h * 0.42;
     const peaks = this.peaks;
     const n = peaks.length;
-    const startX = (this.start / this.duration) * w;
-    const endX = (this.end / this.duration) * w;
 
-    // Zona seleccionada (fondo)
+    const timeToX = (time) => ((time - from) / span) * w;
+    const startX = timeToX(this.start);
+    const endX = timeToX(this.end);
+
     if (endX > startX) {
       ctx.fillStyle = COLORS.selectedSoft;
-      ctx.fillRect(startX, 0, endX - startX, h);
+      ctx.fillRect(Math.max(0, startX), 0, Math.min(w, endX) - Math.max(0, startX), h);
     }
 
-    // Barras
     for (let x = 0; x < w; x++) {
-      const peak = peaks[Math.min(n - 1, Math.floor((x / w) * n))] || 0;
+      const time = from + (x / w) * span;
+      if (time < 0 || time > this.duration) continue;
+      const peak = peaks[Math.min(n - 1, Math.max(0, Math.floor((time / this.duration) * n)))] || 0;
       const half = Math.max(0.6, peak * amp);
-      const inSel = x >= startX && x <= endX;
-      ctx.fillStyle = inSel ? COLORS.selected : (x < startX || x > endX ? COLORS.idleDim : COLORS.idle);
+      const inSel = time >= this.start && time <= this.end;
+      ctx.fillStyle = inSel ? COLORS.selected : COLORS.outside;
       ctx.fillRect(x, mid - half, 1, half * 2);
     }
 
-    // Líneas de los marcadores
-    ctx.fillStyle = COLORS.selected;
-    ctx.fillRect(Math.round(startX), 0, 2, h);
-    ctx.fillRect(Math.max(0, Math.round(endX) - 2), 0, 2, h);
+    // Marcadores: START azul, END naranja.
+    if (startX >= 0 && startX <= w) {
+      ctx.fillStyle = COLORS.start;
+      ctx.fillRect(Math.round(startX), 0, 2, h);
+    }
+    if (endX >= 0 && endX <= w) {
+      ctx.fillStyle = COLORS.end;
+      ctx.fillRect(Math.max(0, Math.round(endX) - 2), 0, 2, h);
+    }
 
-    // Cursor de reproducción
+    // Cursor de reproducción.
     if (this.head >= 0) {
-      const hx = Math.max(0, Math.min(w, (this.head / this.duration) * w));
-      ctx.fillStyle = COLORS.head;
-      ctx.fillRect(Math.round(hx), 0, 1.5, h);
-      ctx.beginPath();
-      ctx.arc(hx, 6, 4, 0, Math.PI * 2);
-      ctx.fill();
+      const hx = timeToX(this.head);
+      if (hx >= 0 && hx <= w) {
+        ctx.fillStyle = COLORS.head;
+        ctx.fillRect(Math.round(hx), 0, 1.5, h);
+        ctx.beginPath();
+        ctx.arc(hx, 6, 4, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
   }
 }

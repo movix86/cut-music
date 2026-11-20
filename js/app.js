@@ -9,6 +9,7 @@ import { isAudioFile, describeFile, readDuration, readArrayBuffer, bindDropZone,
 import { AudioWorkerClient } from './worker-manager.js';
 import { downloadBlob, makeZip, sanitizeFilename } from './export-manager.js';
 import { buildPeaks, WaveView } from './wave-editor.js';
+import { t, setLang, applyStatic, getLang } from './i18n.js';
 
 const $ = (id) => document.getElementById(id);
 const APP_VERSION = '1.1.0';
@@ -44,7 +45,9 @@ const state = {
   // v1.1.0 — corte por intervalo (excluyente con la división por partes)
   intervalMode: false,
   interval: null,
-  wave: { key: null, peaks: null, duration: 0, loadingKey: null },
+  wave: { key: null, peaks: null, duration: 0, loadingKey: null, scrub: null },
+  zoomLevel: 0,
+  view: { start: 0, span: 0 },
 };
 
 const el = {
@@ -68,6 +71,8 @@ const el = {
   markerStart: $('markerStart'), markerEnd: $('markerEnd'), playhead: $('playhead'),
   playBar: $('playBar'), playBtn: $('playBtn'), pauseBtn: $('pauseBtn'), stopBtn: $('stopBtn'),
   playTime: $('playTime'), playSpan: $('playSpan'),
+  langBar: $('langBar'), zoomBar: $('zoomBar'),
+  splitBtnLabel: $('splitBtnLabel'),
   splitBtn: $('splitBtn'), globalError: $('globalError'),
   progressCard: $('progressCard'), progressBar: $('progressBar'), progressPercent: $('progressPercent'),
   progressFragment: $('progressFragment'), progressEta: $('progressEta'), progressPhase: $('progressPhase'),
@@ -114,19 +119,19 @@ function updateFormatOptions() {
   const fmt = currentFormat();
   el.bitrateRow.classList.toggle('d-none', !fmt.lossy);
   if (fmt.id === 'ogg') {
-    el.formatHint.textContent = 'OGG usa Vorbis con calidad variable (q5), calidad alta sin elegir bitrate.';
+    el.formatHint.textContent = t('formatHint.ogg');
   } else if (fmt.id === 'wav') {
-    el.formatHint.textContent = 'WAV sin pérdida (PCM 16 bits). Tamaño grande: 10 s ≈ 1,7 MB a 44,1 kHz estéreo.';
+    el.formatHint.textContent = t('formatHint.wav');
   } else if (fmt.id === 'flac') {
-    el.formatHint.textContent = 'FLAC sin pérdida, comprimido. Cortes exactos y calidad idéntica al original.';
+    el.formatHint.textContent = t('formatHint.flac');
   } else if (fmt.id === 'm4a') {
-    el.formatHint.textContent = 'M4A con AAC. Buena calidad con archivos pequeños.';
+    el.formatHint.textContent = t('formatHint.m4a');
   } else if (fmt.id === 'aac') {
-    el.formatHint.textContent = 'AAC en bruto (ADTS), sin contenedor MP4.';
+    el.formatHint.textContent = t('formatHint.aac');
   } else if (fmt.id === 'wma') {
-    el.formatHint.textContent = 'WMA (Windows Media Audio). Compatible con reproductores antiguos de Windows.';
+    el.formatHint.textContent = t('formatHint.wma');
   } else {
-    el.formatHint.textContent = 'MP3 con LAME. El formato más compatible.';
+    el.formatHint.textContent = t('formatHint.mp3');
   }
 }
 
@@ -134,16 +139,16 @@ function updateFormatOptions() {
 async function ensureWorker() {
   if (state.worker && state.workerReady) return;
   if (!state.worker) {
-    el.fileStatus.textContent = 'Cargando motor…';
+    el.fileStatus.textContent = t('status.engineLoading');
     state.worker = new AudioWorkerClient();
   }
-  el.fileStatus.textContent = 'Cargando motor (30 MB la primera vez)…';
+  el.fileStatus.textContent = t('status.engineFirst');
   const info = await state.worker.init();
   state.encoders = info.encoders;
   window.__CUTDEBUG = info;
   state.workerReady = true;
   populateFormats();
-  el.fileStatus.textContent = 'Listo';
+  el.fileStatus.textContent = t('status.ready');
   updateSplitButton();
 }
 
@@ -152,11 +157,11 @@ async function selectFile(file) {
   if (!file) return;
   clearError();
   if (!isAudioFile(file)) {
-    showError('Ese archivo no parece de audio. Formatos: MP3, WAV, FLAC, M4A, AAC, OGG, WMA…');
+    showError(t('err.notAudio'));
     return;
   }
   if (file.size > 1024 * 1024 * 1024) {
-    showError('El archivo supera 1 GB; Chrome puede quedarse sin memoria.');
+    showError(t('err.tooBig'));
     return;
   }
 
@@ -175,7 +180,9 @@ async function selectFile(file) {
     try { previewAudio.pause(); previewAudio.removeAttribute('src'); previewAudio.load(); } catch (e) { /* noop */ }
   }
   if (previewUrl) { URL.revokeObjectURL(previewUrl); previewUrl = null; }
-  state.wave = { key: null, peaks: null, duration: 0, loadingKey: null };
+  state.wave = { key: null, peaks: null, duration: 0, loadingKey: null, scrub: null };
+  scrubBuffer = null;
+  state.zoomLevel = 0;
   if (waveView) waveView.clear();
   showWaveUI(false);
 
@@ -185,7 +192,7 @@ async function selectFile(file) {
   el.fileSize.textContent = formatBytes(file.size);
   el.fileRate.textContent = '—';
   el.fileDuration.textContent = '—';
-  el.fileStatus.textContent = 'Leyendo metadatos…';
+  el.fileStatus.textContent = t('status.reading');
   updateSummary();
   updateSplitButton();
 
@@ -205,24 +212,24 @@ async function selectFile(file) {
   } catch (error) {
     window.__CUTPROBE_ERR = String(error && error.message || error);
     if (!state.duration) {
-      showError('No se pudo leer la duración de este archivo: ' + error.message);
+      showError(t('err.durationRead', { msg: error.message }));
     }
   }
 
   if (state.duration) {
     el.fileDuration.textContent = formatTime(state.duration, 2);
-    el.fileStatus.textContent = 'Listo';
+    el.fileStatus.textContent = t('status.ready');
     if (state.intervalMode && !el.intervalEnd.value.trim()) {
       el.intervalEnd.value = formatTimestamp(state.duration);
     }
   } else {
-    el.fileDuration.textContent = 'Desconocida';
-    el.fileStatus.textContent = 'Formato no reconocido';
+    el.fileDuration.textContent = t('status.unknownDuration');
+    el.fileStatus.textContent = t('status.unknownFormat');
   }
 
   updateSummary();
   updateSplitButton();
-  if (state.intervalMode) ensureWaveform();
+  if (state.intervalMode) { applyView(); ensureWaveform(); } else { scrubState.active = false; stopScrubSource(0.01); }
 }
 
 function clearFile() {
@@ -231,7 +238,9 @@ function clearFile() {
   if (previewAudio) {
     try { previewAudio.removeAttribute('src'); previewAudio.load(); } catch (e) { /* noop */ }
   }
-  state.wave = { key: null, peaks: null, duration: 0, loadingKey: null };
+  state.wave = { key: null, peaks: null, duration: 0, loadingKey: null, scrub: null };
+  scrubBuffer = null;
+  state.zoomLevel = 0;
   if (waveView) waveView.clear();
   showWaveUI(false);
   el.playhead.classList.remove('visible');
@@ -274,41 +283,51 @@ function setIntervalMode(on) {
     el.playhead.classList.remove('visible');
   }
 
-  el.splitBtn.innerHTML = state.intervalMode
-    ? '<i class="bi bi-clock-history"></i> CORTAR INTERVALO'
-    : '<i class="bi bi-scissors"></i> DIVIDIR CANCIÓN';
+  const splitIcon = el.splitBtn.querySelector('i');
+  if (splitIcon) splitIcon.className = state.intervalMode ? 'bi bi-clock-history' : 'bi bi-scissors';
+  if (el.splitBtnLabel) el.splitBtnLabel.textContent = t(state.intervalMode ? 'btn.cut' : 'btn.split');
 
   state.remainderChosen = false;
   updateSummary();
   updateSplitButton();
 
-  if (state.intervalMode) ensureWaveform();
+  if (state.intervalMode) { applyView(); ensureWaveform(); } else { scrubState.active = false; stopScrubSource(0.01); }
 }
 
 function validateInterval() {
-  if (!state.file) return { ok: false, error: 'Carga primero una canción.' };
-  if (!state.duration) return { ok: false, error: 'No se conoce la duración de la canción.' };
+  if (!state.file) return { ok: false, key: 'val.needFile', vars: {}, field: 'start' };
+  if (!state.duration) return { ok: false, key: 'val.noDuration', vars: {}, field: 'start' };
 
   const start = parseTimestamp(el.intervalStart.value);
-  if (!start.ok) return { ok: false, error: 'Tiempo de inicio: ' + start.error };
+  if (!start.ok) {
+    return { ok: false, key: 'val.prefixStart', vars: { msg: t(start.error) }, field: 'start' };
+  }
 
   const end = parseTimestamp(el.intervalEnd.value);
-  if (!end.ok) return { ok: false, error: 'Tiempo de finalización: ' + end.error };
+  if (!end.ok) {
+    return { ok: false, key: 'val.prefixEnd', vars: { msg: t(end.error) }, field: 'end' };
+  }
 
   if (start.value >= end.value) {
-    return { ok: false, error: 'El tiempo final debe ser superior al tiempo inicial.' };
+    return { ok: false, key: 'val.startBeforeEnd', vars: {}, field: 'end' };
   }
   if (end.value > state.duration + 0.001) {
     return {
       ok: false,
-      error: `El tiempo final no puede superar la duración de la canción (${formatTimestamp(state.duration)}).`,
+      key: 'val.endBeyond',
+      vars: { dur: formatTimestamp(state.duration) },
+      field: 'end',
     };
   }
   const dur = end.value - start.value;
   if (dur <= 0.0005) {
-    return { ok: false, error: 'El intervalo debe tener una duración mayor que cero.' };
+    return { ok: false, key: 'val.zero', vars: {}, field: 'end' };
   }
-  return { ok: true, start: start.value, end: end.value, dur };
+  return { ok: true, start: start.value, end: end.value, dur, key: null, vars: {}, field: null };
+}
+
+function intervalErrorText(v) {
+  return v && v.key ? t(v.key, v.vars) : '';
 }
 
 function updateIntervalUI() {
@@ -318,22 +337,25 @@ function updateIntervalUI() {
     return;
   }
   const v = validateInterval();
-  const startInvalid = !v.ok && /inicio/i.test(v.error || '');
-  const endInvalid = !v.ok && /finalizaci/i.test(v.error || '');
+  const startInvalid = !v.ok && v.field === 'start';
+  const endInvalid = !v.ok && v.field === 'end';
   el.intervalStart.classList.toggle('is-invalid', startInvalid);
   el.intervalEnd.classList.toggle('is-invalid', endInvalid);
   el.intervalError.classList.toggle('d-none', v.ok);
 
   if (!v.ok) {
-    el.intervalError.textContent = v.error;
-    el.intervalInfo.textContent = 'Se generará un único archivo con el intervalo indicado.';
+    el.intervalError.textContent = intervalErrorText(v);
+    el.intervalInfo.textContent = t('interval.info.invalid');
     state.interval = null;
     updatePlayButtons();
     return;
   }
   state.interval = v;
-  el.intervalInfo.textContent =
-    `Se generará 1 archivo de ${formatTime(v.dur, 2)} (${formatTimestamp(v.start)} → ${formatTimestamp(v.end)}).`;
+  el.intervalInfo.textContent = t('interval.info.valid', {
+    dur: formatTime(v.dur, 2),
+    start: formatTimestamp(v.start),
+    end: formatTimestamp(v.end),
+  });
   positionMarkers(v);
   updateWaveLabels(v);
   updatePlayButtons();
@@ -347,11 +369,84 @@ let previewUrl = null;
 let previewPlaying = false;
 let previewRaf = 0;
 
+/* ---------------- zoom de la onda (7 niveles) ---------------- */
+function zoomSpan(level) {
+  const dur = state.duration || 1;
+  return dur * Math.pow(2, -level);
+}
+
+function computeView() {
+  const dur = state.duration || 1;
+  const span = Math.min(Math.max(zoomSpan(state.zoomLevel), 0.02), dur * 8);
+  let start;
+  if (span >= dur) {
+    start = (dur - span) / 2;
+  } else {
+    const mid = state.interval ? (state.interval.start + state.interval.end) / 2 : dur / 2;
+    start = Math.max(0, Math.min(dur - span, mid - span / 2));
+  }
+  state.view = { start, span };
+  return state.view;
+}
+
+function timeToPct(time) {
+  const span = state.view.span || (state.duration || 1);
+  return ((time - state.view.start) / span) * 100;
+}
+
+function placeMarker(node, percent) {
+  node.style.left = `${percent}%`;
+  node.style.visibility = percent < -0.01 || percent > 100.01 ? 'hidden' : '';
+}
+
+function xToTime(clientX) {
+  const rect = el.waveWrap.getBoundingClientRect();
+  if (!rect.width) return 0;
+  const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+  return state.view.start + ratio * state.view.span;
+}
+
+function setZoomButtons() {
+  if (!el.zoomBar) return;
+  el.zoomBar.querySelectorAll('[data-zoom]').forEach((b) => {
+    b.classList.toggle('active', Number(b.dataset.zoom) === state.zoomLevel);
+  });
+}
+
+function applyView() {
+  if (!waveView || !state.duration) return;
+  const view = computeView();
+  waveView.setView(view.start, view.span);
+  if (state.interval) positionMarkers(state.interval);
+  if (previewAudio) setHead(previewAudio.currentTime);
+  setZoomButtons();
+  if (el.waveWrap) el.waveWrap.classList.toggle('cm-zoomed', state.zoomLevel !== 0);
+}
+
+function setZoom(level) {
+  state.zoomLevel = Math.max(-3, Math.min(3, Number(level) || 0));
+  applyView();
+}
+
+function ensureVisible(time) {
+  if (!state.duration || !state.view.span) return;
+  const span = state.view.span;
+  if (span >= state.duration) return;
+  const margin = span * 0.08;
+  if (time < state.view.start + margin) {
+    state.view.start = Math.max(0, time - span * 0.15);
+  } else if (time > state.view.start + span - margin) {
+    state.view.start = Math.min(state.duration - span, time - span * 0.85);
+  }
+  if (waveView) waveView.setView(state.view.start, span);
+  if (state.interval) positionMarkers(state.interval);
+  if (previewAudio) setHead(previewAudio.currentTime);
+}
+
 function positionMarkers(v) {
   if (!state.duration) return;
-  const pct = (t) => `${Math.min(100, Math.max(0, (t / state.duration) * 100))}%`;
-  el.markerStart.style.left = pct(v.start);
-  el.markerEnd.style.left = pct(v.end);
+  placeMarker(el.markerStart, timeToPct(v.start));
+  placeMarker(el.markerEnd, timeToPct(v.end));
   if (waveView) waveView.setSelection(v.start, v.end);
   if (!previewPlaying) setHead(v.start);
 }
@@ -364,9 +459,10 @@ function updateWaveLabels(v) {
 }
 
 function setHead(seconds) {
-  const total = state.duration || 1;
+  const pct = timeToPct(seconds);
   el.playhead.classList.add('visible');
-  el.playhead.style.left = `${Math.min(100, Math.max(0, (seconds / total) * 100))}%`;
+  el.playhead.style.left = `${pct}%`;
+  el.playhead.style.visibility = pct < -0.01 || pct > 100.01 ? 'hidden' : '';
   el.playTime.textContent = formatTimestamp(seconds);
   if (waveView) waveView.setHead(seconds);
 }
@@ -426,7 +522,7 @@ async function playInterval() {
   try {
     await audio.play();
   } catch (error) {
-    showError('No se pudo reproducir el audio: ' + error.message);
+    showError(t('err.playback', { msg: error.message }));
     return;
   }
   previewPlaying = true;
@@ -453,11 +549,114 @@ function tickPreview() {
   previewRaf = requestAnimationFrame(tickPreview);
 }
 
-function markerSecondsFromX(clientX) {
-  const rect = el.waveWrap.getBoundingClientRect();
-  if (!rect.width) return 0;
-  const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
-  return ratio * (state.duration || 0);
+/* ---------------- Live scrubbing al mover los marcadores ---------------- */
+let scratchCtx = null;
+let scrubBuffer = null;
+let scrubFallbackPlaying = false;
+const scrubState = { active: false, which: null, source: null, gain: null, lastAt: 0 };
+
+async function ensureScratchCtx() {
+  if (!scratchCtx) {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return null;
+    scratchCtx = new Ctx();
+  }
+  if (scratchCtx.state === 'suspended') {
+    try { await scratchCtx.resume(); } catch (e) { /* noop */ }
+  }
+  return scratchCtx;
+}
+
+function ensureScrubBuffer() {
+  if (scrubBuffer) return scrubBuffer;
+  const source = state.wave && state.wave.scrub;
+  if (!source || !source.data || !scratchCtx) return null;
+  const buffer = scratchCtx.createBuffer(1, source.data.length, source.sampleRate);
+  buffer.copyToChannel(source.data, 0);
+  scrubBuffer = buffer;
+  // Se libera la copia Float32Array: el AudioBuffer ya contiene el PCM.
+  state.wave.scrub = { duration: source.duration };
+  return scrubBuffer;
+}
+
+function stopScrubSource(fade = 0.02) {
+  if (!scrubState.source || !scratchCtx) return;
+  const { source, gain } = scrubState;
+  try {
+    const now = scratchCtx.currentTime;
+    gain.gain.cancelScheduledValues(now);
+    gain.gain.setValueAtTime(Math.max(0.0001, gain.gain.value || 0.0001), now);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + fade);
+    source.stop(now + fade + 0.01);
+  } catch (e) { /* noop */ }
+  scrubState.source = null;
+  scrubState.gain = null;
+}
+
+function playScrubAt(time) {
+  if (!scrubState.active) return;
+  const now = performance.now();
+  if (now - scrubState.lastAt < 70) return;
+  scrubState.lastAt = now;
+  if (state.wave.scrub && !scratchCtx) return;
+
+  if (scratchCtx && state.wave.scrub) {
+    const buffer = ensureScrubBuffer();
+    if (buffer) {
+      stopScrubSource(0.012);
+      const source = scratchCtx.createBufferSource();
+      source.buffer = buffer;
+      const gain = scratchCtx.createGain();
+      const at = scratchCtx.currentTime;
+      gain.gain.setValueAtTime(0.0001, at);
+      gain.gain.exponentialRampToValueAtTime(1, at + 0.008);
+      source.connect(gain).connect(scratchCtx.destination);
+      const offset = Math.min(Math.max(0, time), Math.max(0, buffer.duration - 0.03));
+      source.start(at, offset);
+      source.stop(at + 0.45);
+      scrubState.source = source;
+      scrubState.gain = gain;
+      return;
+    }
+  }
+
+  // Respaldo sin búfer (canciones largas): búsqueda en el elemento <audio>.
+  if (!previewUrl) setPreviewSource();
+  const audio = ensurePreviewAudio();
+  try {
+    audio.currentTime = Math.max(0, time);
+    if (!scrubFallbackPlaying) {
+      scrubFallbackPlaying = true;
+      audio.play().catch(() => {});
+    }
+  } catch (e) { /* noop */ }
+}
+
+async function startScrub(which) {
+  if (!state.intervalMode || !state.file) return;
+  if (previewPlaying) pausePreview();
+  scrubState.active = true;
+  scrubState.which = which;
+  scrubState.lastAt = 0;
+  await ensureScratchCtx();
+}
+
+function endScrub() {
+  if (!scrubState.active) return;
+  scrubState.active = false;
+  stopScrubSource(0.03);
+  if (scrubFallbackPlaying) {
+    scrubFallbackPlaying = false;
+    if (previewAudio) { try { previewAudio.pause(); } catch (e) { /* noop */ } }
+  }
+  const v = validateInterval();
+  if (v.ok && previewAudio) {
+    try {
+      previewAudio.currentTime = scrubState.which === 'start' ? v.start : v.end;
+      setHead(scrubState.which === 'start' ? v.start : v.end);
+    } catch (e) { /* noop */ }
+  }
+  scrubState.which = null;
 }
 
 function applyMarkerDrag(which, seconds) {
@@ -466,22 +665,23 @@ function applyMarkerDrag(which, seconds) {
   const curStart = v.ok ? v.start : 0;
   const curEnd = v.ok ? v.end : state.duration;
 
-  if (previewPlaying) stopPreview();
-
+  let target;
   if (which === 'start') {
-    const start = Math.min(Math.max(0, seconds), curEnd - MIN_SELECTION);
-    el.intervalStart.value = formatTimestamp(start);
+    target = Math.min(Math.max(0, seconds), curEnd - MIN_SELECTION);
+    el.intervalStart.value = formatTimestamp(target);
   } else {
-    const end = Math.max(Math.min(state.duration, seconds), curStart + MIN_SELECTION);
-    el.intervalEnd.value = formatTimestamp(end);
+    target = Math.max(Math.min(state.duration, seconds), curStart + MIN_SELECTION);
+    el.intervalEnd.value = formatTimestamp(target);
   }
   updateIntervalUI();
   updateSplitButton();
+  ensureVisible(target);
 
-  if (state.interval && previewAudio) {
-    try { previewAudio.currentTime = state.interval.start; } catch (e) { /* noop */ }
-    setHead(state.interval.start);
+  if (previewAudio) {
+    try { previewAudio.currentTime = target; } catch (e) { /* noop */ }
   }
+  setHead(target);
+  playScrubAt(target);
 }
 
 function bindMarkerDrag(marker, which) {
@@ -490,17 +690,24 @@ function bindMarkerDrag(marker, which) {
     event.preventDefault();
     try { marker.setPointerCapture(event.pointerId); } catch (e) { /* puntero sintetico */ }
     marker.classList.add('dragging');
-    const move = (e) => applyMarkerDrag(which, markerSecondsFromX(e.clientX));
+    startScrub(which);
+
+    let moved = false;
+    const move = (e) => {
+      moved = true;
+      applyMarkerDrag(which, xToTime(e.clientX));
+    };
     const up = () => {
       marker.classList.remove('dragging');
       marker.removeEventListener('pointermove', move);
       marker.removeEventListener('pointerup', up);
       marker.removeEventListener('pointercancel', up);
+      endScrub();
     };
     marker.addEventListener('pointermove', move);
     marker.addEventListener('pointerup', up);
     marker.addEventListener('pointercancel', up);
-    applyMarkerDrag(which, markerSecondsFromX(event.clientX));
+    applyMarkerDrag(which, xToTime(event.clientX));
   });
 }
 
@@ -516,34 +723,35 @@ async function ensureWaveform() {
   if (state.wave.key === key && state.wave.peaks) {
     waveView.setData(state.wave.peaks, state.wave.duration);
     showWaveUI(true);
-    el.waveStatus.textContent = 'Lista';
-    if (state.interval) positionMarkers(state.interval);
+    el.waveStatus.textContent = t('wave.ready');
+    applyView();
     return;
   }
   if (state.wave.loadingKey === key) return;
 
   if (state.duration > 900 || state.file.size > 200 * 1024 * 1024) {
-    el.waveStatus.textContent = 'No disponible para archivos muy largos';
+    el.waveStatus.textContent = t('wave.tooLong');
     showWaveUI(true);
     return;
   }
 
   state.wave.loadingKey = key;
-  el.waveStatus.textContent = 'Generando forma de onda…';
+  el.waveStatus.textContent = t('wave.loading');
   showWaveUI(true);
 
   try {
-    const { peaks, duration } = await buildPeaks(state.file, 1400);
+    const { peaks, duration, scrub } = await buildPeaks(state.file, 1400);
     if (!state.file || `${state.file.name}:${state.file.size}:${state.file.lastModified}` !== key) return;
-    state.wave = { key, peaks, duration, loadingKey: null };
+    scrubBuffer = null;
+    state.wave = { key, peaks, duration, loadingKey: null, scrub: scrub || null };
     waveView.setData(peaks, duration);
-    el.waveStatus.textContent = 'Lista';
-    if (state.interval) positionMarkers(state.interval);
+    el.waveStatus.textContent = t('wave.ready');
+    applyView();
   } catch (error) {
     state.wave.loadingKey = null;
-    el.waveStatus.textContent = 'No disponible';
+    el.waveStatus.textContent = t('wave.unavailable');
     el.intervalError.classList.remove('d-none');
-    el.intervalError.textContent = 'No se pudo generar la forma de onda: ' + error.message;
+    el.intervalError.textContent = t('wave.error', { msg: error.message });
   }
 }
 
@@ -576,7 +784,7 @@ function updateSummary() {
   const chunk = parseChunk(el.chunkInput.value);
   el.chunkInput.classList.toggle('is-invalid', !chunk.ok);
   el.chunkError.classList.toggle('d-none', chunk.ok);
-  if (!chunk.ok) el.chunkError.textContent = chunk.error;
+  if (!chunk.ok) el.chunkError.textContent = t(chunk.error);
 
   if (!chunk.ok || !state.duration) {
     el.sumFull.textContent = '—';
@@ -596,7 +804,7 @@ function updateSummary() {
     el.sumLast.textContent = formatTime(plan.lastDuration, 2);
     el.sumTotal.textContent = '1';
     el.remainderInfo.classList.remove('d-none');
-    el.remainderInfo.textContent = 'La canción es más corta que el fragmento: se exportará entera como un único archivo.';
+    el.remainderInfo.textContent = t('note.shortSong');
     return;
   }
 
@@ -610,10 +818,10 @@ function updateSummary() {
 
   if (plan.hasRemainder && !(state.remainderChosen && state.mode === MODE.MERGE)) {
     el.remainderInfo.classList.remove('d-none');
-    el.remainderInfo.textContent = `Sobran ${formatTime(plan.remainder, 2)}: el último fragmento durará ${formatTime(plan.lastDuration, 2)}.`;
+    el.remainderInfo.textContent = t('note.remainder', { t: formatTime(plan.remainder, 2), last: formatTime(plan.lastDuration, 2) });
   } else if (plan.hasRemainder && state.remainderChosen && state.mode === MODE.MERGE) {
     el.remainderInfo.classList.remove('d-none');
-    el.remainderInfo.textContent = `Sobrante unido al último fragmento: durará ${formatTime(plan.lastDuration, 2)}.`;
+    el.remainderInfo.textContent = t('note.merged', { t: formatTime(plan.lastDuration, 2) });
   } else {
     el.remainderInfo.classList.add('d-none');
   }
@@ -629,11 +837,11 @@ function updateSplitButton() {
   }
   el.splitBtn.disabled = !ready;
   if (!state.workerReady && state.file) {
-    el.splitBtn.title = 'Cargando el motor de audio…';
+    el.splitBtn.title = t('status.engineLoading');
   } else if (!state.file) {
-    el.splitBtn.title = 'Elige primero una canción';
+    el.splitBtn.title = t('err.pickFile');
   } else if (state.intervalMode && !validateInterval().ok) {
-    el.splitBtn.title = 'Revisa los tiempos del intervalo';
+    el.splitBtn.title = t('val.titleInterval');
   } else {
     el.splitBtn.title = '';
   }
@@ -645,14 +853,14 @@ function askRemainder(plan) {
     const chunk = state.chunk;
     const rem = plan.remainder;
     el.remainderText.textContent =
-      `Se ha detectado un fragmento final de ${formatTime(rem, 2)} que no alcanza la duración configurada de ${formatTime(chunk, 2)}. ¿Qué deseas hacer?`;
+      t('modal.body', { rem: formatTime(rem, 2), chunk: formatTime(chunk, 2) });
 
     const sep = computePlan(state.duration, chunk, MODE.SEPARATE);
     const mer = computePlan(state.duration, chunk, MODE.MERGE);
     el.separateDesc.textContent =
-      `${sep.segments.length - 1} fragmentos de ${formatTime(chunk, 2)} + 1 de ${formatTime(rem, 2)} (${sep.total} archivos).`;
+      t('modal.separateDesc', { n: sep.segments.length - 1, chunk: formatTime(chunk, 2), rem: formatTime(rem, 2), total: sep.total });
     el.mergeDesc.textContent =
-      `${mer.segments.length - 1} fragmentos y el último de ${formatTime(mer.lastDuration, 2)} (${mer.total} archivos).`;
+      t('modal.mergeDesc', { n: mer.segments.length - 1, last: formatTime(mer.lastDuration, 2), total: mer.total });
 
     const cleanup = () => {
       el.modeSeparate.removeEventListener('click', onSeparate);
@@ -679,18 +887,18 @@ function askRemainder(plan) {
 /* ---------------- procesamiento ---------------- */
 async function startSplit() {
   clearError();
-  if (!state.file) { showError('Elige una canción primero.'); return; }
-  if (!state.duration) { showError('No se conoce la duración de la canción.'); return; }
+  if (!state.file) { showError(t('err.pickFile')); return; }
+  if (!state.duration) { showError(t('err.noDuration')); return; }
 
   let interval = null;
   let chunk = null;
   if (state.intervalMode) {
     interval = validateInterval();
     updateIntervalUI();
-    if (!interval.ok) { showError(interval.error); return; }
+    if (!interval.ok) { showError(intervalErrorText(interval)); return; }
   } else {
     chunk = parseChunk(el.chunkInput.value);
-    if (!chunk.ok) { showError(chunk.error); return; }
+    if (!chunk.ok) { showError(t(chunk.error)); return; }
   }
 
   try {
@@ -704,7 +912,7 @@ async function startSplit() {
     await ensureWorker();
     state.workerUsed = true;
   } catch (error) {
-    showError('No se pudo cargar FFmpeg: ' + error.message);
+    showError(t('err.engine', { msg: error.message }));
     return;
   }
 
@@ -754,22 +962,22 @@ async function startSplit() {
   el.progressPercent.textContent = '0%';
   el.progressFragment.textContent = `0 / ${plan.total}`;
   el.progressEta.textContent = '—';
-  el.progressPhase.textContent = 'Preparando';
-  el.progressDetail.textContent = 'Cargando el motor de audio y el archivo…';
+  el.progressPhase.textContent = t('progress.phase.preparing');
+  el.progressDetail.textContent = t('progress.preparing');
 
   let bytes = state.cachedBytes;
   state.cachedBytes = null; // el buffer se transfiere al worker: no se reutiliza
   if (!bytes || bytes.byteLength === 0) {
     try { bytes = await readArrayBuffer(state.file); }
-    catch (error) { showError('No se pudo leer el archivo: ' + error.message); resetBusy(); return; }
+    catch (error) { showError(t('err.fileRead', { msg: error.message })); resetBusy(); return; }
   }
 
   const startedAt = performance.now();
 
   const finishOk = () => {
     state.busy = false;
-    el.progressPhase.textContent = 'Completado';
-    el.progressDetail.textContent = 'PROCESAMIENTO COMPLETADO';
+    el.progressPhase.textContent = t('progress.phase.completed');
+    el.progressDetail.textContent = t('progress.completed');
     el.progressBar.style.width = '100%';
     el.progressPercent.textContent = '100%';
     showResults();
@@ -798,7 +1006,7 @@ async function startSplit() {
       if (state.cancelled) break;
 
       if (offset > 0) {
-        el.progressDetail.textContent = `Preparando motor para los fragmentos ${offset + 1}–${Math.min(offset + BATCH, total)}…`;
+        el.progressDetail.textContent = t('progress.engineBatch', { from: offset + 1, to: Math.min(offset + BATCH, total) });
         await resetWorker();
       }
 
@@ -827,8 +1035,8 @@ async function startSplit() {
           el.progressBar.style.width = pct + '%';
           el.progressPercent.textContent = pct + '%';
           el.progressFragment.textContent = `${completed} / ${total}`;
-          el.progressPhase.textContent = 'Codificando';
-          el.progressDetail.textContent = `Fragmento ${completed} de ${total}`;
+          el.progressPhase.textContent = t('progress.phase.encoding');
+          el.progressDetail.textContent = t('progress.fragmentOf', { done: completed, total });
           const elapsed = performance.now() - startedAt;
           if (completed > 0) {
             const per = elapsed / completed;
@@ -846,8 +1054,8 @@ async function startSplit() {
     if (state.cancelled) {
       state.results = [];
       state.busy = false;
-      el.progressPhase.textContent = 'Cancelado';
-      el.progressDetail.textContent = 'Operación cancelada. No se ha generado ningún archivo nuevo.';
+      el.progressPhase.textContent = t('progress.phase.cancelled');
+      el.progressDetail.textContent = t('progress.cancelled');
       updateSplitButton();
       return;
     }
@@ -855,10 +1063,10 @@ async function startSplit() {
     const failed = state.results.filter((r) => r.error).length;
     finishOk();
     if (failed) {
-      showError(`${failed} fragmento(s) no se pudieron codificar por falta de memoria. Prueba con fragmentos más largos o una canción más corta.`);
+      showError(t('err.failedFragments', { n: failed }));
     }
   } catch (error) {
-    showError('Error durante el procesamiento: ' + error.message);
+    showError(t('err.processing', { msg: error.message }));
     resetBusy();
   }
 }
@@ -872,13 +1080,13 @@ function resetBusy() {
 function showResults() {
   const ok = state.results.filter((r) => !r.error);
   el.resultsCard.classList.remove('d-none');
-  el.resultsMeta.textContent = `${ok.length} archivo(s)`;
+  el.resultsMeta.textContent = t('results.files', { n: ok.length });
   el.resultsList.innerHTML = ok.map((r) => `
     <div class="cm-result-row">
       <i class="bi bi-file-earmark-music"></i>
       <span class="name" title="${escapeHtml(r.name)}">${escapeHtml(r.name)}</span>
       <span class="dur">${formatTime(r.dur || 0, 2)}</span>
-      <button class="btn btn-sm cm-btn-outline" data-dl="${escapeHtml(r.name)}">
+      <button class="btn btn-sm cm-btn-outline" data-dl="${escapeHtml(r.name)}" title="${escapeHtml(t('btn.downloadFile'))}">
         <i class="bi bi-download"></i>
       </button>
     </div>`).join('');
@@ -949,18 +1157,59 @@ function bindEvents() {
     handleIntervalFieldInput();
   });
 
+  // Arrastrar la onda (fuera de los marcadores) desplaza la vista con zoom.
+  el.waveCanvas.addEventListener('pointerdown', (event) => {
+    if (!state.intervalMode || !state.duration) return;
+    if (state.view.span >= state.duration) return;
+    event.preventDefault();
+    const startX = event.clientX;
+    const startView = state.view.start;
+    const width = el.waveWrap.getBoundingClientRect().width || 1;
+    el.waveCanvas.style.cursor = 'grabbing';
+    const move = (e) => {
+      const delta = ((e.clientX - startX) / width) * state.view.span;
+      const maxStart = Math.max(0, state.duration - state.view.span);
+      state.view.start = Math.min(maxStart, Math.max(0, startView - delta));
+      if (waveView) waveView.setView(state.view.start, state.view.span);
+      if (state.interval) positionMarkers(state.interval);
+      if (previewAudio) setHead(previewAudio.currentTime);
+    };
+    const up = () => {
+      el.waveCanvas.style.cursor = '';
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  });
   el.playBtn.addEventListener('click', playInterval);
   el.pauseBtn.addEventListener('click', pausePreview);
   el.stopBtn.addEventListener('click', stopPreview);
   bindMarkerDrag(el.markerStart, 'start');
   bindMarkerDrag(el.markerEnd, 'end');
 
+  if (el.langBar) {
+    el.langBar.addEventListener('click', (event) => {
+      const btn = event.target.closest('[data-lang]');
+      if (!btn) return;
+      setLang(btn.dataset.lang);
+      refreshLanguageUI();
+    });
+  }
+  if (el.zoomBar) {
+    el.zoomBar.addEventListener('click', (event) => {
+      const btn = event.target.closest('[data-zoom]');
+      if (!btn) return;
+      setZoom(Number(btn.dataset.zoom));
+    });
+  }
+
 
   el.splitBtn.addEventListener('click', startSplit);
   el.cancelBtn.addEventListener('click', () => {
     state.cancelled = true;
-    el.progressPhase.textContent = 'Cancelando';
-    el.progressDetail.textContent = 'Se detendrá al terminar el fragmento actual…';
+    el.progressPhase.textContent = t('progress.canceling');
+    el.progressDetail.textContent = t('progress.cancelingDetail');
     if (state.worker) state.worker.cancel();
   });
 
@@ -972,7 +1221,7 @@ function bindEvents() {
       const blob = await makeZip(ok.map((r) => ({ name: r.name, blob: r.blob })));
       downloadBlob(blob, `${state.desc.base}_${state.intervalMode ? 'intervalo' : 'partes'}.zip`);
     } catch (error) {
-      showError('No se pudo crear el ZIP: ' + error.message);
+      showError(t('err.zip', { msg: error.message }));
     } finally {
       el.zipBtn.disabled = false;
     }
@@ -1013,7 +1262,32 @@ function bindPwa() {
 }
 
 /* ---------------- arranque ---------------- */
+
+function refreshLanguageUI() {
+  applyStatic();
+  if (el.langBar) {
+    el.langBar.querySelectorAll('[data-lang]').forEach((b) => {
+      b.classList.toggle('active', b.dataset.lang === getLang());
+    });
+  }
+  if (el.splitBtnLabel) el.splitBtnLabel.textContent = t(state.intervalMode ? 'btn.cut' : 'btn.split');
+  updateFormatOptions();
+  updateSummary();
+  updateSplitButton();
+  if (state.file && state.duration) el.fileStatus.textContent = t('status.ready');
+  if (state.intervalMode) {
+    if (state.wave.peaks) el.waveStatus.textContent = t('wave.ready');
+    else if (state.wave.loadingKey) el.waveStatus.textContent = t('wave.loading');
+  }
+  if (!el.resultsCard.classList.contains('d-none')) {
+    el.resultsMeta.textContent = t('results.files', { n: state.results.filter((r) => !r.error).length });
+  }
+  updatePlayButtons();
+}
+
 function boot() {
+  setLang('es');
+  applyStatic();
   remainderModal = new window.bootstrap.Modal(el.remainderModal, { backdrop: 'static', keyboard: false });
   waveView = new WaveView(el.waveWrap, el.waveCanvas);
   if (typeof ResizeObserver === 'function') {
@@ -1030,5 +1304,5 @@ function boot() {
   el.rateSelect.value = String(state.sampleRate);
 }
 
-window.__CUTMUSIC__ = { state, selectFile, startSplit, clearFile, previewState: () => ({ playing: previewPlaying, current: previewAudio ? previewAudio.currentTime : null, start: state.interval ? state.interval.start : null, end: state.interval ? state.interval.end : null }) };
+window.__CUTMUSIC__ = { state, selectFile, startSplit, clearFile, previewState: () => ({ playing: previewPlaying, current: previewAudio ? previewAudio.currentTime : null, start: state.interval ? state.interval.start : null, end: state.interval ? state.interval.end : null }), waveInfo: () => ({ zoom: state.zoomLevel, view: { ...state.view }, peaks: state.wave.peaks ? state.wave.peaks.length : 0, scrubSeconds: state.wave.scrub ? (state.wave.scrub.data ? state.wave.scrub.data.length : 0) : 0 }), scrubInfo: () => ({ active: scrubState.active, ctx: scratchCtx ? scratchCtx.state : 'none', buffer: scrubBuffer ? scrubBuffer.duration : 0 }) };
 boot();

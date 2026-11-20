@@ -85,3 +85,37 @@ hora/minuto/segundo de ahí; verificado en 79,9999 s → `00:01:20.000`.
 - No se cruzan: el inicio se limita a `fin − 0,01 s` y el final a `inicio + 0,01 s`.
 - La selección se dibuja en naranja sobre la onda y el resto en gris azulado.
 - El lienzo se redimensiona con `ResizeObserver` (sin deformar la escala temporal).
+---
+
+## Zoom, START/END, live scrubbing e idiomas (1.1.0, 20/11/2026)
+
+| # | Caso | Resultado |
+|---|---|---|
+| 1 | Forma de onda al cargar | 1400 picos, ventana completa 0–230 s ✅ |
+| 2 | Zoom +1 / +2 / +3 | ventana 115 s → 57,5 s → 28,75 s (mitad en cada nivel) ✅ |
+| 3 | Zoom −1 / −2 / −3 | ventana 460 s → 920 s → 1840 s (canción centrada) ✅ |
+| 4 | Marcadores con zoom | porcentajes recalculados; arrastre preciso ✅ |
+| 5 | START azul / END naranja | etiquetas INICIO (azul) y FIN (naranja) en la parte superior ✅ |
+| 6 | Live scrubbing START | `AudioContext` en estado *running*, búfer 230 s; 40 → 45 s al arrastrar ✅ |
+| 7 | Live scrubbing END | 70 → 75 s; posición fijada al soltar ✅ |
+| 8 | Play | arranca en el inicio del intervalo (45 s) ✅ |
+| 9 | Pause | posición congelada y reanudación exacta ✅ |
+| 10 | Stop | vuelve a 45,000 s ✅ |
+| 11 | Español al iniciar | idioma por defecto ✅ |
+| 12 | Inglés (GB y US) | ambos botones activan `en`; START/END y textos en inglés ✅ |
+| 13 | Francés | DÉBUT/FIN y textos franceses ✅ |
+| 14 | Chino | 开始/结束, caracteres correctos, `lang="zh-CN"` ✅ |
+| 15 | Cambio en caliente | conserva canción, selección (45→80), zoom y onda ✅ |
+| 16 | Exportación tras zoom/scrub | `cancion230_Intervalo.mp3` de 35,000 s ✅ |
+| 17 | Regresión partes | 230 s ÷ 10 s → 23 archivos ✅ |
+| 18 | ZIP | `cancion230_partes.zip` ✅ |
+| 19 | Original | SHA-256 sin cambios ✅ |
+
+### Notas de implementación
+
+- Zoom: `span = duración · 2^(−nivel)`; niveles −3…+3. Se centra en la selección y, cuando
+  la selección es mayor que la ventana, ambos marcadores quedan fuera hasta desplazarse.
+- Desplazamiento: arrastrar la onda (fuera de los marcadores) mueve la ventana cuando hay zoom.
+- Scrub: `AudioBufferSourceNode` sobre el búfer mono decodificado; se reinicia cada ~70 ms con
+  fundido de 8 ms. Respaldo con `<audio>` para canciones de más de 10 minutos.
+- Idiomas: diccionario único `js/i18n.js`; textos estáticos con `data-i18n` y dinámicos con `t()`.

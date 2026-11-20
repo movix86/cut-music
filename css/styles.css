@@ -497,3 +497,55 @@ body {
 .cm-btn-icon:hover { background: rgba(255, 122, 26, 0.22); color: var(--cm-accent-2); }
 .cm-btn-icon:disabled { opacity: 0.4; }
 .cm-playtime { font-variant-numeric: tabular-nums; font-size: 0.82rem; }
+
+/* ---------- v1.1.0: idiomas, zoom y marcadores START/END ---------- */
+.cm-langs { display: flex; align-items: center; gap: 4px; }
+.cm-lang {
+  width: 30px; height: 23px; padding: 2px;
+  display: grid; place-items: center;
+  background: #0e131c;
+  border: 1px solid var(--cm-border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.cm-lang svg { display: block; width: 22px; height: 15px; border-radius: 2px; }
+.cm-lang:hover { border-color: var(--cm-accent); }
+.cm-lang.active { border-color: var(--cm-accent); background: rgba(255, 122, 26, 0.14); box-shadow: 0 0 0 1px rgba(255, 122, 26, 0.35); }
+
+.cm-wave-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.cm-zoombar { display: flex; gap: 3px; margin-left: auto; }
+.cm-zoom {
+  min-width: 30px; height: 24px; padding: 0 5px;
+  font-size: 0.72rem; font-weight: 700;
+  background: #0e131c;
+  border: 1px solid var(--cm-border);
+  color: var(--cm-muted);
+  border-radius: 6px;
+}
+.cm-zoom:hover { border-color: var(--cm-accent); color: var(--cm-accent); }
+.cm-zoom.active { background: rgba(255, 122, 26, 0.16); border-color: var(--cm-accent); color: var(--cm-accent-2); }
+
+.cm-marker { background: #ff7a1a; }
+.cm-marker::after { border-top-color: #ff7a1a; }
+.cm-marker--start { background: #4da3ff; }
+.cm-marker--start::after { border-top-color: #4da3ff; }
+.cm-marker--end { background: #ff7a1a; }
+.cm-marker--end::after { border-top-color: #ff7a1a; }
+.cm-marker:hover, .cm-marker.dragging { filter: brightness(1.25); }
+.cm-marker-label {
+  position: absolute;
+  top: 13px;
+  padding: 1px 5px;
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  border-radius: 3px;
+  color: #08101c;
+  background: #4da3ff;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.cm-marker--start .cm-marker-label { left: 4px; }
+.cm-marker--end .cm-marker-label { right: 4px; background: #ff7a1a; }
+
+.cm-wave-wrap.cm-zoomed #waveCanvas { cursor: grab; }
